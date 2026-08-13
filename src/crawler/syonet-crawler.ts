@@ -46,5 +46,9 @@ export async function processLeadJob(job: LeadJob): Promise<void> {
   } finally {
     await page.close().catch(() => {});
     await context.close().catch(() => {});
+    if (!isHeadless) {
+      const { closeBrowser } = await import('./syonet-browser.js');
+      await closeBrowser();
+    }
   }
 }

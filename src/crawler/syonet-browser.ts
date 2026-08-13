@@ -29,6 +29,14 @@ export async function getBrowser(customHeadless?: boolean): Promise<Browser> {
   return browserInstance;
 }
 
+export async function closeBrowser(): Promise<void> {
+  if (browserInstance) {
+    await browserInstance.close().catch(() => {});
+    browserInstance = null;
+    currentHeadlessMode = null;
+  }
+}
+
 export async function createBrowserContext(customHeadless?: boolean): Promise<BrowserContext> {
   const browser = await getBrowser(customHeadless);
   const dir = path.dirname(STORAGE_STATE_PATH);
