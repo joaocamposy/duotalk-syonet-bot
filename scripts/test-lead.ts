@@ -46,10 +46,10 @@ async function testLeadFlow() {
     await createNewEventForContact(page, newLead);
     console.log('✅ Cenário A (Novo Cliente) testado com sucesso!');
 
-    // TESTE CENÁRIO B: Telefone Existente (Seleção de Cliente Existente + Evento)
+    // TESTE CENÁRIO B: Telefone Existente (Buscando telefone já cadastrado no Syonet CRM)
     const existingLead: DuotalkLeadData = {
       nome: 'Duotalk Teste Bot',
-      telefone: '5561999990001', // Número que já existe no CRM
+      telefone: '5561999990001', // Telefone cadastrado no banco do Syonet
       email: 'teste.duotalk@example.com',
       cpf: '00000000000',
       estado: 'DF',

@@ -254,17 +254,21 @@ export async function processContactSearchAndSave(
   } else {
     // Resultados encontrados — clicar no primeiro resultado do wizard
     const wizardResults = legacyFrame.locator(
-      'evento-wizard-search .search-result, evento-wizard-search li[ng-click], evento-wizard-search .cliente-item',
+      'evento-wizard-search .search-result, evento-wizard-search li[ng-click], evento-wizard-search .cliente-item, evento-wizard-search table tr[ng-click], evento-wizard-search .syo-list-item',
     );
     const resultCount = await wizardResults.count();
+    if (resultCount === 0) {
+      throw new Error(
+        `Nenhum cliente encontrado com o telefone ${parsedPhone.fullWithoutDdi} no Syonet CRM para o Cenário B.`,
+      );
+    }
+
     logger.info(
       { count: resultCount },
       'CENÁRIO B: Contato localizado. Abrindo registro existente.',
     );
 
-    if (resultCount > 0) {
-      await wizardResults.first().click();
-      await page.waitForTimeout(3000);
-    }
+    await wizardResults.first().click();
+    await page.waitForTimeout(3000);
   }
 }
