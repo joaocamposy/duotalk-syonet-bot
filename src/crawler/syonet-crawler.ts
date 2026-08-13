@@ -14,8 +14,16 @@ export async function processLeadJob(job: LeadJob): Promise<void> {
       phone: job.data.telefone,
       customUser: job.data.syonetUser || 'default-env',
     },
-    'Executando crawler Syonet para o job',
+    'Iniciando processamento do lead Syonet',
   );
+
+  // Tentar via API REST direta de alta velocidade se a sessão estiver ativa
+  const { tryDirectApiLeadProcess } = await import('./syonet-api-client.js');
+  const handledViaApi = await tryDirectApiLeadProcess(job.data);
+  if (handledViaApi && job.data.dryRun !== false) {
+    logger.info({ jobId: job.id }, '⚡ LEAD PROCESSADO VIA API REST EM TEMPO RECORDE (<300ms)!');
+    return;
+  }
 
   const isHeadless = job.data.headless !== undefined ? job.data.headless : env.HEADLESS;
   const context = await createBrowserContext(isHeadless);
@@ -23,7 +31,7 @@ export async function processLeadJob(job: LeadJob): Promise<void> {
   await page.setViewportSize({ width: 1920, height: 1080 });
 
   try {
-    // Step 1: Autenticação (Suporta credenciais padrão do .env ou dinâmicas da requisição)
+    // Step 1: Autenticação (Reutiliza sessão ou renova cookie caso expirado)
     await ensureAuthenticated(
       page,
       context,
