@@ -41,7 +41,7 @@ export function buildApp() {
   });
 
   app.register(swaggerUi, {
-    routePrefix: '/docs',
+    routePrefix: '/',
   });
 
   // Registra as rotas HTTP
