@@ -22,9 +22,9 @@ export const duotalkLeadDataSchema = z.object({
   integrationEmailValue: z.string().nullable().optional(),
   url_duotalk: z.string().optional(),
   intencao: z.string().optional(),
-  cpf: z.string().optional(),
-  estado: z.string().optional(),
-  cidade: z.string().optional(),
+  cpf: z.string().min(1, 'CPF é obrigatório para cadastro no Syonet'),
+  estado: z.string().min(1, 'Estado (UF) é obrigatório para cadastro no Syonet'),
+  cidade: z.string().min(1, 'Cidade é obrigatória para cadastro no Syonet'),
   cep: z.string().optional(),
 
   // Modo de simulação/demonstração e bypass de desduplicação

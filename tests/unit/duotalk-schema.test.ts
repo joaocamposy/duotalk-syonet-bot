@@ -31,6 +31,9 @@ describe('Duotalk Payload Schema Validation', () => {
           'https://app.duotalk.io/apps/inbox/start-conversation?name=Vilmar%20Medeiros&phone=5561993351327',
         firstMessage: '',
         intencao: 'DVNU - Veículos Novos',
+        cpf: '00000000000',
+        estado: 'DF',
+        cidade: 'Brasília',
       },
     };
 
@@ -46,6 +49,9 @@ describe('Duotalk Payload Schema Validation', () => {
       telefone: '5511988887777',
       email: 'maria@exemplo.com',
       intencao: 'Novos',
+      cpf: '11122233344',
+      estado: 'SP',
+      cidade: 'São Paulo',
     };
 
     const parsed = duotalkLeadDataSchema.parse(rawLeadData);

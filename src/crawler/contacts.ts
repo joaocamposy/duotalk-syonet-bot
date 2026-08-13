@@ -63,10 +63,9 @@ export async function processContactSearchAndSave(
 
     // Preencher CPF (obrigatório pelas regras de negócio da conta Syonet)
     const cpfInput = legacyFrame.locator('#eventowizard-cliente-cpfcnpj');
-    const cpfValue = lead.cpf || '00000000000';
     if (await cpfInput.isVisible()) {
-      await cpfInput.fill(cpfValue);
-      logger.info({ cpf: cpfValue }, 'CPF preenchido');
+      await cpfInput.fill(lead.cpf);
+      logger.info({ cpf: lead.cpf }, 'CPF preenchido');
     }
 
     // Preencher Endereço Comercial (exigido na regra da conta Syonet)
@@ -94,24 +93,24 @@ export async function processContactSearchAndSave(
 
     const estadoComercial = legacyFrame.locator('#eventowizard-cliente-estado-comercial');
     if (await estadoComercial.isVisible()) {
-      if (lead.estado) {
-        await estadoComercial.selectOption({ label: lead.estado }).catch(async () => {
-          await estadoComercial.selectOption({ index: 1 }).catch(() => {});
-        });
-      } else {
-        await estadoComercial.selectOption({ index: 1 }).catch(() => {});
+      try {
+        await estadoComercial.selectOption({ label: lead.estado });
+        await page.waitForTimeout(500);
+      } catch {
+        throw new Error(
+          `Não foi possível selecionar o Estado "${lead.estado}" no formulário do Syonet. Verifique a sigla enviada.`,
+        );
       }
-      await page.waitForTimeout(500);
     }
 
     const cidadeComercial = legacyFrame.locator('#eventowizard-cliente-cidade-comercial');
     if (await cidadeComercial.isVisible()) {
-      if (lead.cidade) {
-        await cidadeComercial.selectOption({ label: lead.cidade }).catch(async () => {
-          await cidadeComercial.selectOption({ index: 1 }).catch(() => {});
-        });
-      } else {
-        await cidadeComercial.selectOption({ index: 1 }).catch(() => {});
+      try {
+        await cidadeComercial.selectOption({ label: lead.cidade });
+      } catch {
+        throw new Error(
+          `Não foi possível selecionar a Cidade "${lead.cidade}" no formulário do Syonet. Verifique o nome da cidade enviado.`,
+        );
       }
     }
 
