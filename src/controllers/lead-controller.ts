@@ -6,6 +6,7 @@ import {
 } from '../types/duotalk-payload.js';
 import { queueInstance } from '../queue/queue-manager.js';
 import { logger } from '../utils/logger.js';
+import { env } from '../config/env.js';
 
 export async function handleDuotalkWebhook(
   request: FastifyRequest,
