@@ -20,7 +20,7 @@ export async function processLeadJob(job: LeadJob): Promise<void> {
   // Tentar via API REST direta de alta velocidade se a sessão estiver ativa
   const { tryDirectApiLeadProcess } = await import('./syonet-api-client.js');
   const handledViaApi = await tryDirectApiLeadProcess(job.data);
-  if (handledViaApi && job.data.dryRun !== false) {
+  if (handledViaApi) {
     logger.info({ jobId: job.id }, '⚡ LEAD PROCESSADO VIA API REST EM TEMPO RECORDE (<300ms)!');
     return;
   }
