@@ -2,8 +2,7 @@ import fs from 'node:fs';
 import { DuotalkLeadData } from '../types/duotalk-payload.js';
 import { logger } from '../utils/logger.js';
 import { parsePhoneNumber } from '../utils/phone-parser.js';
-
-const STORAGE_STATE_PATH = './data/storage_state.json';
+import { getStorageStatePathForUser } from './syonet-browser.js';
 
 interface CookieItem {
   name: string;
@@ -16,12 +15,13 @@ interface StorageState {
   cookies: CookieItem[];
 }
 
-export function getStoredSessionCookies(): string | null {
-  if (!fs.existsSync(STORAGE_STATE_PATH)) {
+export function getStoredSessionCookies(url?: string, user?: string): string | null {
+  const storagePath = getStorageStatePathForUser(url, user);
+  if (!fs.existsSync(storagePath)) {
     return null;
   }
   try {
-    const raw = fs.readFileSync(STORAGE_STATE_PATH, 'utf-8');
+    const raw = fs.readFileSync(storagePath, 'utf-8');
     const parsed: StorageState = JSON.parse(raw);
     if (!parsed.cookies || parsed.cookies.length === 0) {
       return null;
@@ -33,9 +33,12 @@ export function getStoredSessionCookies(): string | null {
 }
 
 export async function tryDirectApiLeadProcess(lead: DuotalkLeadData): Promise<boolean> {
-  const cookieHeader = getStoredSessionCookies();
+  const cookieHeader = getStoredSessionCookies(lead.syonetUrl, lead.syonetUser);
   if (!cookieHeader) {
-    logger.info('Nenhum cookie de sessão armazenado em cache. Utilizando o navegador.');
+    logger.info(
+      { user: lead.syonetUser || 'env' },
+      'Nenhum cookie de sessão armazenado em cache para este tenant/usuário. Utilizando o navegador.',
+    );
     return false;
   }
 

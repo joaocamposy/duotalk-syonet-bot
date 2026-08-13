@@ -38,8 +38,8 @@ export async function ensureAuthenticated(
       logger.info('Navegação pós-login concluída ou estabilizada via SPA');
     });
 
-    await saveStorageState(context);
+    await saveStorageState(context, targetUrl, username);
   } else {
-    logger.info('Sessão ativa reutilizada via storageState');
+    logger.info('Sessão ativa reutilizada via storageState por conta/tenant');
   }
 }

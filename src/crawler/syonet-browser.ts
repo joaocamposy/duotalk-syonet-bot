@@ -4,10 +4,19 @@ import path from 'node:path';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 
+import crypto from 'node:crypto';
+
 let browserInstance: Browser | null = null;
-const STORAGE_STATE_PATH = './data/storage_state.json';
+const SESSIONS_DIR = './data/sessions';
 
 let currentHeadlessMode: boolean | null = null;
+
+export function getStorageStatePathForUser(url?: string, user?: string): string {
+  const targetUrl = url || env.SYONET_URL;
+  const targetUser = user || env.SYONET_USER;
+  const hash = crypto.createHash('md5').update(`${targetUrl}_${targetUser}`).digest('hex');
+  return path.join(SESSIONS_DIR, `storage_${hash}.json`);
+}
 
 export async function getBrowser(customHeadless?: boolean): Promise<Browser> {
   const isHeadless = customHeadless !== undefined ? customHeadless : env.HEADLESS;
@@ -37,24 +46,39 @@ export async function closeBrowser(): Promise<void> {
   }
 }
 
-export async function createBrowserContext(customHeadless?: boolean): Promise<BrowserContext> {
+export async function createBrowserContext(
+  customHeadless?: boolean,
+  url?: string,
+  user?: string,
+): Promise<BrowserContext> {
   const browser = await getBrowser(customHeadless);
-  const dir = path.dirname(STORAGE_STATE_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(SESSIONS_DIR)) {
+    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
   }
 
-  const hasStorageState = fs.existsSync(STORAGE_STATE_PATH);
-  const contextOptions = hasStorageState ? { storageState: STORAGE_STATE_PATH } : {};
+  const storagePath = getStorageStatePathForUser(url, user);
+  const hasStorageState = fs.existsSync(storagePath);
+  const contextOptions = hasStorageState ? { storageState: storagePath } : {};
 
   const context = await browser.newContext(contextOptions);
   return context;
 }
 
-export async function saveStorageState(context: BrowserContext): Promise<void> {
+export async function saveStorageState(
+  context: BrowserContext,
+  url?: string,
+  user?: string,
+): Promise<void> {
   try {
-    await context.storageState({ path: STORAGE_STATE_PATH });
-    logger.info({ path: STORAGE_STATE_PATH }, 'Sessão e cookies do Syonet salvos em arquivo');
+    if (!fs.existsSync(SESSIONS_DIR)) {
+      fs.mkdirSync(SESSIONS_DIR, { recursive: true });
+    }
+    const storagePath = getStorageStatePathForUser(url, user);
+    await context.storageState({ path: storagePath });
+    logger.info(
+      { path: storagePath, user: user || 'env' },
+      'Sessão e cookies do Syonet salvos em arquivo por conta/tenant',
+    );
   } catch (err) {
     logger.error({ err }, 'Erro ao salvar storageState do Playwright');
   }
