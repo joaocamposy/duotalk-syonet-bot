@@ -131,8 +131,9 @@ export async function tryDirectApiLeadProcess(lead: DuotalkLeadData): Promise<bo
       }
 
       if (!createRes.ok) {
+        const errorBody = await createRes.text().catch(() => '');
         logger.warn(
-          { status: createRes.status },
+          { status: createRes.status, errorBody },
           'Não foi possível criar o cliente via API REST. Recorrendo ao navegador.',
         );
         return false;
