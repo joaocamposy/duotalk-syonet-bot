@@ -220,21 +220,44 @@ export async function processContactSearchAndSave(
       }
     }
 
+    // Preencher Celular no formulário de criação de cliente
+    const celularInput = legacyFrame.locator(
+      'input[ng-model="$cliente.celular"], input[name="celular"], #eventowizard-cliente-celular, .flag-container + input',
+    );
+    if ((await celularInput.count()) > 0 && (await celularInput.first().isVisible())) {
+      await celularInput
+        .first()
+        .fill(parsedPhone.fullWithoutDdi)
+        .catch(() => {});
+    }
+
     // Selecionar Origem (obrigatório — select com id "eventowizard-cliente-origem")
     const origemSelect = legacyFrame.locator('#eventowizard-cliente-origem');
     if (await origemSelect.isVisible()) {
-      const origemValue = lead.origem ?? 'INTERNET';
-      await origemSelect.selectOption({ label: origemValue }).catch(async () => {
-        const firstOption = await legacyFrame.evaluate((selId: string) => {
-          const select = document.getElementById(selId) as HTMLSelectElement;
-          const options = Array.from(select?.options ?? []);
-          const nonEmpty = options.find((o) => o.value && o.value !== '');
-          return nonEmpty?.value ?? '';
-        }, 'eventowizard-cliente-origem');
-        if (firstOption) {
-          await origemSelect.selectOption(firstOption);
+      const targetOrigem = (lead.origem || 'INTERNET').toUpperCase();
+      try {
+        const matchingOrigem = await legacyFrame.evaluate((orig: string) => {
+          const select = document.getElementById(
+            'eventowizard-cliente-origem',
+          ) as HTMLSelectElement;
+          const opt = Array.from(select?.options ?? []).find(
+            (o) =>
+              o.text.toUpperCase() === orig ||
+              o.value.toUpperCase() === orig ||
+              o.text.toUpperCase().includes(orig),
+          );
+          return opt?.value ?? '';
+        }, targetOrigem);
+
+        if (matchingOrigem) {
+          await origemSelect.selectOption(matchingOrigem);
+        } else {
+          await origemSelect.selectOption({ index: 1 });
         }
-      });
+      } catch {
+        await origemSelect.selectOption({ index: 1 }).catch(() => {});
+      }
+      await page.waitForTimeout(500);
       logger.info('Origem selecionada');
     }
 
