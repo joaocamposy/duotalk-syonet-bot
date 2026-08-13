@@ -87,7 +87,6 @@ export async function handleDuotalkWebhook(
     }
   }
 
-  const query = request.query as { sync?: string };
   const isSyncRequested =
     query?.sync === 'true' ||
     request.headers['x-sync'] === 'true' ||
