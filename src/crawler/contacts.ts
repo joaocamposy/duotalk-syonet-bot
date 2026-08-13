@@ -71,22 +71,25 @@ export async function processContactSearchAndSave(
     // O wizard já preenche automaticamente o celular com o telefone pesquisado.
     // Campos obrigatórios restantes: Nome (*), Origem (*). Email é recomendado.
 
-    // Preencher Nome (obrigatório)
+    // Preencher Nome (obrigatório com pressSequentially para acionar o model do AngularJS)
     const nomeInput = legacyFrame.locator('#eventowizard-cliente-nome');
-    await nomeInput.fill(lead.nome);
+    await nomeInput.focus();
+    await nomeInput.pressSequentially(lead.nome, { delay: 30 });
     logger.info({ nome: lead.nome }, 'Nome preenchido');
 
     // Preencher Email (se disponível)
     if (lead.email) {
       const emailInput = legacyFrame.locator('#eventowizard-cliente-email');
-      await emailInput.fill(lead.email);
+      await emailInput.focus();
+      await emailInput.pressSequentially(lead.email, { delay: 30 });
       logger.info({ email: lead.email }, 'Email preenchido');
     }
 
     // Preencher CPF (obrigatório pelas regras de negócio da conta Syonet)
     const cpfInput = legacyFrame.locator('#eventowizard-cliente-cpfcnpj');
     if (await cpfInput.isVisible()) {
-      await cpfInput.fill(lead.cpf);
+      await cpfInput.focus();
+      await cpfInput.pressSequentially(lead.cpf, { delay: 30 });
       logger.info({ cpf: lead.cpf }, 'CPF preenchido');
     }
 
