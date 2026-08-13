@@ -17,12 +17,14 @@ export async function processLeadJob(job: LeadJob): Promise<void> {
     'Iniciando processamento do lead Syonet',
   );
 
-  // Tentar via API REST direta de alta velocidade se a sessão estiver ativa
-  const { tryDirectApiLeadProcess } = await import('./syonet-api-client.js');
-  const handledViaApi = await tryDirectApiLeadProcess(job.data);
-  if (handledViaApi) {
-    logger.info({ jobId: job.id }, '⚡ LEAD PROCESSADO VIA API REST EM TEMPO RECORDE (<300ms)!');
-    return;
+  // Tentar via API REST direta apenas quando em modo dryRun de teste ultra-rápido
+  if (job.data.dryRun) {
+    const { tryDirectApiLeadProcess } = await import('./syonet-api-client.js');
+    const handledViaApi = await tryDirectApiLeadProcess(job.data);
+    if (handledViaApi) {
+      logger.info({ jobId: job.id }, '⚡ LEAD PROCESSADO VIA API REST EM TEMPO RECORDE (<300ms)!');
+      return;
+    }
   }
 
   const isHeadless = job.data.headless !== undefined ? job.data.headless : env.HEADLESS;
