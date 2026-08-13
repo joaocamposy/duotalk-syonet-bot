@@ -9,9 +9,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
   // Credenciais do Syonet
-  SYONET_URL: z.string().url().default('https://syonet.exemplo.com.br'),
-  SYONET_USER: z.string().default('usuario_teste'),
-  SYONET_PASS: z.string().default('senha_teste'),
+  SYONET_URL: z.string().url().default('https://crm.grupoab.com.br/portal/acessaSistema.do'),
+  SYONET_USER: z.string().default('duotalk.teste'),
+  SYONET_PASS: z.string().default('*86A207C07'),
 
   // Fila & Dedup
   QUEUE_DRIVER: z.enum(['memory', 'file', 'redis']).default('file'),
