@@ -92,6 +92,17 @@ export async function processContactSearchAndSave(
       await tipoLogradouroComercial.selectOption({ index: 1 }).catch(() => {});
     }
 
+    const estadoComercial = legacyFrame.locator('#eventowizard-cliente-estado-comercial');
+    if (await estadoComercial.isVisible()) {
+      await estadoComercial.selectOption({ index: 1 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+
+    const cidadeComercial = legacyFrame.locator('#eventowizard-cliente-cidade-comercial');
+    if (await cidadeComercial.isVisible()) {
+      await cidadeComercial.selectOption({ index: 1 }).catch(() => {});
+    }
+
     // Selecionar Origem (obrigatório — select com id "eventowizard-cliente-origem")
     const origemSelect = legacyFrame.locator('#eventowizard-cliente-origem');
     if (await origemSelect.isVisible()) {
