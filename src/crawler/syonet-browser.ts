@@ -7,10 +7,20 @@ import { logger } from '../utils/logger.js';
 let browserInstance: Browser | null = null;
 const STORAGE_STATE_PATH = './data/storage_state.json';
 
+let currentHeadlessMode: boolean | null = null;
+
 export async function getBrowser(customHeadless?: boolean): Promise<Browser> {
   const isHeadless = customHeadless !== undefined ? customHeadless : env.HEADLESS;
+
+  // Se o modo headless mudou (ex: de true para false na demonstração), recria o navegador
+  if (browserInstance && currentHeadlessMode !== null && currentHeadlessMode !== isHeadless) {
+    await browserInstance.close().catch(() => {});
+    browserInstance = null;
+  }
+
   if (!browserInstance || !browserInstance.isConnected()) {
     logger.info({ headless: isHeadless }, 'Iniciando nova instância do navegador Playwright');
+    currentHeadlessMode = isHeadless;
     browserInstance = await chromium.launch({
       headless: isHeadless,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],

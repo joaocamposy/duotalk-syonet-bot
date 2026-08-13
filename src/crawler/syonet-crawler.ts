@@ -4,6 +4,7 @@ import { ensureAuthenticated } from './auth.js';
 import { processContactSearchAndSave } from './contacts.js';
 import { createNewEventForContact } from './events.js';
 import { logger } from '../utils/logger.js';
+import { env } from '../config/env.js';
 
 export async function processLeadJob(job: LeadJob): Promise<void> {
   logger.info(
