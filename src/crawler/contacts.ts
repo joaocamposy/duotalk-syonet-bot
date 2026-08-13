@@ -13,14 +13,36 @@ export async function processContactSearchAndSave(
     'Iniciando pesquisa prévia de contato no Syonet',
   );
 
-  const legacyFrame = page.frame({ name: 'home' });
+  // Aguarda até o iframe "home" carregar no DOM da SPA do Syonet
+  await page.waitForSelector('iframe[name="home"]', { timeout: 15000 }).catch(() => {});
+
+  let legacyFrame = page.frame({ name: 'home' });
   if (!legacyFrame) {
-    throw new Error('Frame "home" não encontrado na página.');
+    // Tenta encontrar o frame por src ou nome alternativo se a re-renderização da SPA alterou o estado
+    legacyFrame = page.frames().find((f) => f.name() === 'home' || f.url().includes('cic.do'));
+  }
+
+  if (!legacyFrame) {
+    throw new Error(
+      'Frame "home" do Syonet CRM não foi encontrado ou não carregou a tempo na página.',
+    );
+  }
+
+  // Fechar qualquer modal/overlay aberto do job anterior se existir
+  const closeButtons = legacyFrame.locator(
+    'button.ui-dialog-titlebar-close, button:has-text("Voltar"), button:has-text("Fechar")',
+  );
+  if ((await closeButtons.count()) > 0) {
+    await closeButtons
+      .first()
+      .click()
+      .catch(() => {});
+    await page.waitForTimeout(500);
   }
 
   // Clicar no botão "Pesquisar clientes"
   const searchBtn = legacyFrame.locator('a:has-text("Pesquisar clientes")').nth(1);
-  await searchBtn.click();
+  await searchBtn.click({ force: true });
   await page.waitForTimeout(3000);
 
   // Selecionar o radio Telefone via label (inputs radio são CSS-hidden no Syonet)

@@ -6,7 +6,10 @@ import { DuotalkLeadData } from '../src/types/duotalk-payload.js';
 async function testLeadFlow() {
   console.log('🚀 Executando teste COMPLETO do crawler Syonet (Cenários A e B)...');
 
-  const browser = await chromium.launch({ headless: false }); // Visível para demonstração
+  const browser = await chromium.launch({
+    headless: false,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  });
   const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
   const page = await context.newPage();
 
