@@ -3,6 +3,13 @@ import { DuotalkLeadData } from '../types/duotalk-payload.js';
 import { logger } from '../utils/logger.js';
 
 export async function createNewEventForContact(page: Page, lead: DuotalkLeadData): Promise<void> {
+  if (lead.dryRun) {
+    logger.info(
+      '⚠️ MODO DRY-RUN / DEMONSTRAÇÃO ATIVO: Criação de Novo Evento/Oportunidade ignorada para não gravar dados de teste no CRM.',
+    );
+    return;
+  }
+
   logger.info(
     { leadId: lead.id, intencao: lead.intencao },
     'Iniciando criação de Novo Evento / Oportunidade',

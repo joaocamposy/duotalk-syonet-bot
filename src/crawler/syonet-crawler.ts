@@ -16,7 +16,8 @@ export async function processLeadJob(job: LeadJob): Promise<void> {
     'Executando crawler Syonet para o job',
   );
 
-  const context = await createBrowserContext();
+  const isHeadless = job.data.headless !== undefined ? job.data.headless : env.HEADLESS;
+  const context = await createBrowserContext(isHeadless);
   const page = await context.newPage();
   await page.setViewportSize({ width: 1920, height: 1080 });
 

@@ -7,19 +7,20 @@ import { logger } from '../utils/logger.js';
 let browserInstance: Browser | null = null;
 const STORAGE_STATE_PATH = './data/storage_state.json';
 
-export async function getBrowser(): Promise<Browser> {
+export async function getBrowser(customHeadless?: boolean): Promise<Browser> {
+  const isHeadless = customHeadless !== undefined ? customHeadless : env.HEADLESS;
   if (!browserInstance || !browserInstance.isConnected()) {
-    logger.info({ headless: env.HEADLESS }, 'Iniciando nova instância do navegador Playwright');
+    logger.info({ headless: isHeadless }, 'Iniciando nova instância do navegador Playwright');
     browserInstance = await chromium.launch({
-      headless: env.HEADLESS,
+      headless: isHeadless,
       args: ['--no-sandbox', '--disable-setuid-sandbox'],
     });
   }
   return browserInstance;
 }
 
-export async function createBrowserContext(): Promise<BrowserContext> {
-  const browser = await getBrowser();
+export async function createBrowserContext(customHeadless?: boolean): Promise<BrowserContext> {
+  const browser = await getBrowser(customHeadless);
   const dir = path.dirname(STORAGE_STATE_PATH);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });

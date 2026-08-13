@@ -111,6 +111,14 @@ export async function processContactSearchAndSave(
     }
 
     // Clicar em "Criar cliente" (botão submit ng-click="$cliente.create()")
+    if (lead.dryRun) {
+      logger.info(
+        '⚠️ MODO DRY-RUN / DEMONSTRAÇÃO ATIVO: Formulário preenchido mas o clique em Criar Cliente foi ignorado para não gravar no banco.',
+      );
+      await page.waitForTimeout(5000);
+      return;
+    }
+
     const submitBtn = legacyFrame.locator('button.syo-success:has-text("Criar cliente")');
     await submitBtn.click();
     await page.waitForTimeout(5000);

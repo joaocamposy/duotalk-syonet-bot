@@ -21,9 +21,12 @@ export const duotalkLeadDataSchema = z.object({
   integrationIdValue: z.string().nullable().optional(),
   integrationEmailValue: z.string().nullable().optional(),
   url_duotalk: z.string().optional(),
-  firstMessage: z.string().optional(),
   intencao: z.string().optional(),
   cpf: z.string().optional(),
+
+  // Modo de simulação/demonstração sem salvar alterações no CRM
+  dryRun: z.boolean().optional(),
+  headless: z.boolean().optional(),
 
   // Suporte a credenciais dinâmicas por tenant/requisição
   syonetUrl: z.string().optional(),
