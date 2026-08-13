@@ -15,7 +15,7 @@ export async function ensureAuthenticated(
   const password = customPass || env.SYONET_PASS;
 
   logger.info({ url: targetUrl, user: username }, 'Navegando para o painel do Syonet CRM');
-  await page.goto(targetUrl, { waitUntil: 'networkidle', timeout: env.PLAYWRIGHT_TIMEOUT });
+  await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: env.PLAYWRIGHT_TIMEOUT });
 
   // Verifica se a tela atual é a página de login (presença de input #login ou #password ou URL com modulo=login)
   const userInput = page.locator('#login');

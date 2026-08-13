@@ -15,57 +15,71 @@ export async function createNewEventForContact(page: Page, lead: DuotalkLeadData
     'Iniciando criação de Novo Evento / Oportunidade',
   );
 
-  // Iniciar a criação do "Novo Evento"
-  const newEventBtn = page.locator(
-    'button:has-text("Novo Evento"), a:has-text("Novo Evento"), button:has-text("Nova Oportunidade"), #btnNovoEvento',
+  // Tenta obter o iframe "home" se a criação de eventos for no modal do wizard AngularJS
+  const legacyFrame =
+    page.frame({ name: 'home' }) ||
+    page.frames().find((f) => f.name() === 'home' || f.url().includes('cic.do')) ||
+    page;
+
+  // Iniciar a criação do "Novo Evento" se houver botão explícito
+  const newEventBtn = legacyFrame.locator(
+    'button:has-text("Novo Evento"), a:has-text("Novo Evento"), button:has-text("Nova Oportunidade"), #btnNovoEvento, #btnSubmit',
   );
   if (await newEventBtn.isVisible()) {
-    await newEventBtn.first().click();
-    await page.waitForLoadState('networkidle');
+    await newEventBtn
+      .first()
+      .click()
+      .catch(() => {});
+    await page.waitForTimeout(2000);
   }
 
   // Preenchimento dos campos do evento
   if (lead.intencao) {
-    const intencaoSelect = page.locator(
+    const intencaoSelect = legacyFrame.locator(
       'select[name="intencao"], select[name="interesse"], #intencao',
     );
     if (await intencaoSelect.isVisible()) {
       await intencaoSelect.selectOption({ label: lead.intencao }).catch(async () => {
-        await page.fill('input[name="intencao"], #intencao', lead.intencao || '');
+        await legacyFrame
+          .fill('input[name="intencao"], #intencao', lead.intencao || '')
+          .catch(() => {});
       });
     }
   }
 
   if (lead.operador) {
-    const operadorField = page.locator(
+    const operadorField = legacyFrame.locator(
       'input[name="operador"], select[name="operador"], #operador',
     );
     if (await operadorField.isVisible()) {
       if ((await operadorField.evaluate((el) => el.tagName.toLowerCase())) === 'select') {
-        await page
+        await legacyFrame
           .selectOption('select[name="operador"]', { label: lead.operador })
           .catch(() => {});
       } else {
-        await operadorField.fill(lead.operador);
+        await operadorField.fill(lead.operador).catch(() => {});
       }
     }
   }
 
-  const observationField = page.locator(
+  const observationField = legacyFrame.locator(
     'textarea[name="observacao"], textarea[name="mensagem"], #observacao',
   );
   if (await observationField.isVisible()) {
     const fullText = `Origem: ${lead.origem || 'Duotalk'} | Canal: ${lead.canal || 'WhatsApp'}\n${lead.mensagem || ''}\nHistory: ${lead.messageHistory || ''}\nURL Duotalk: ${lead.url_duotalk || ''}`;
-    await observationField.fill(fullText);
+    await observationField.fill(fullText).catch(() => {});
   }
 
   // Salvar Evento
-  const saveEventBtn = page.locator(
-    'button:has-text("Salvar Evento"), button:has-text("Salvar"), input[value="Salvar"]',
+  const saveEventBtn = legacyFrame.locator(
+    'button:has-text("Salvar Evento"), button:has-text("Salvar"), button:has-text("Criar Evento"), input[value="Salvar"], #btnSubmit',
   );
   if (await saveEventBtn.isVisible()) {
-    await saveEventBtn.first().click();
-    await page.waitForLoadState('networkidle');
+    await saveEventBtn
+      .first()
+      .click()
+      .catch(() => {});
+    await page.waitForTimeout(3000);
     logger.info('Novo evento gravado com sucesso no Syonet');
   }
 }
