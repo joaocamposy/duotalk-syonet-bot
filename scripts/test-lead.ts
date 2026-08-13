@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
-import { processContactSearchAndSave } from './src/crawler/contacts.js';
-import { createNewEventForContact } from './src/crawler/events.js';
-import { DuotalkLeadData } from './src/types/duotalk-payload.js';
+import { processContactSearchAndSave } from '../src/crawler/contacts.js';
+import { createNewEventForContact } from '../src/crawler/events.js';
+import { DuotalkLeadData } from '../src/types/duotalk-payload.js';
 
 async function testLeadFlow() {
   console.log('🚀 Executando teste COMPLETO do crawler Syonet (Cenários A e B)...');
