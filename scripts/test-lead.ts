@@ -25,11 +25,13 @@ async function testLeadFlow() {
     await page.waitForTimeout(4000);
     console.log('✅ Login efetuado!');
 
+    const miniHash = Math.random().toString(36).substring(2, 8);
+
     // TESTE CENÁRIO A: Telefone novo (Criação de Cliente + Evento)
     const newLead: DuotalkLeadData = {
-      nome: 'Cliente Teste Duotalk',
+      nome: `teste.${miniHash}`,
       telefone: `55619${Math.floor(1000000 + Math.random() * 9000000)}`, // Gerador de número único
-      email: 'cliente.teste@example.com',
+      email: `teste.${miniHash}@example.com`,
       cpf: '00000000000',
       estado: 'DF',
       cidade: 'Brasília',
@@ -48,9 +50,9 @@ async function testLeadFlow() {
 
     // TESTE CENÁRIO B: Telefone Existente (Buscando telefone já cadastrado no Syonet CRM)
     const existingLead: DuotalkLeadData = {
-      nome: 'Duotalk Teste Bot',
+      nome: `teste.${miniHash}`,
       telefone: '5561999990001', // Telefone cadastrado no banco do Syonet
-      email: 'teste.duotalk@example.com',
+      email: `teste.${miniHash}@example.com`,
       cpf: '00000000000',
       estado: 'DF',
       cidade: 'Brasília',
