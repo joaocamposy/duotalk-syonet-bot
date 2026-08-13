@@ -52,6 +52,7 @@ export async function tryDirectApiLeadProcess(lead: DuotalkLeadData): Promise<bo
 
   try {
     // 1. Pesquisar cliente via API REST do Syonet
+    const searchUrl = `${baseUrl}/api/cliente?incluiContatos=true&status=ATIVO&telefone=${parsedPhone.fullWithoutDdi}&timeZoneId=America%2FSao_Paulo`;
 
     let searchRes = await fetch(searchUrl, {
       headers: {
