@@ -285,38 +285,12 @@ export async function processContactSearchAndSave(
       return;
     }
 
-    // Executar $cliente.create() com $apply no escopo do AngularJS
-    await legacyFrame.evaluate(() => {
-      const formEl = document.querySelector('form[name="eventowizardCliente"]') as HTMLFormElement;
-      if (formEl) {
-        const scope = (
-          window as unknown as {
-            angular?: {
-              element: (el: Element | null) => {
-                scope: () => {
-                  $cliente?: { create: () => void };
-                  $apply: (fn: () => void) => void;
-                };
-              };
-            };
-          }
-        ).angular
-          ?.element(formEl)
-          ?.scope();
-        if (scope && scope.$cliente && typeof scope.$cliente.create === 'function') {
-          scope.$apply(() => {
-            scope.$cliente.create();
-          });
-          return;
-        }
-      }
-      const btn = Array.from(document.querySelectorAll('button')).find((b) =>
-        b.textContent?.trim().includes('Criar cliente'),
-      );
-      if (btn) btn.click();
-    });
-
-    await page.waitForTimeout(5000);
+    // Clicar fisicamente no botão "Criar cliente" (ng-click="$cliente.create()")
+    const submitBtn = legacyFrame.locator(
+      'button.syo-success:has-text("Criar cliente"), button:has-text("Criar cliente")',
+    );
+    await submitBtn.first().click();
+    await page.waitForTimeout(6000);
     logger.info('Novo cliente criado com sucesso');
   } else {
     // Resultados encontrados — clicar no primeiro resultado do wizard
