@@ -104,29 +104,67 @@ export async function processContactSearchAndSave(
     const estadoComercial = legacyFrame.locator('#eventowizard-cliente-estado-comercial');
     if (await estadoComercial.isVisible()) {
       try {
-        await estadoComercial.selectOption({ label: lead.estado }).catch(async () => {
-          // Tenta selecionar pelo texto da opção que contenha a sigla enviada
-          const matchingOption = await legacyFrame.evaluate((uf: string) => {
+        const ufMap: Record<string, string> = {
+          AC: 'Acre',
+          AL: 'Alagoas',
+          AP: 'Amapá',
+          AM: 'Amazonas',
+          BA: 'Bahia',
+          CE: 'Ceará',
+          DF: 'Distrito Federal',
+          ES: 'Espírito Santo',
+          GO: 'Goiás',
+          MA: 'Maranhão',
+          MT: 'Mato Grosso',
+          MS: 'Mato Grosso do Sul',
+          MG: 'Minas Gerais',
+          PA: 'Pará',
+          PB: 'Paraíba',
+          PR: 'Paraná',
+          PE: 'Pernambuco',
+          PI: 'Piauí',
+          RJ: 'Rio de Janeiro',
+          RN: 'Rio Grande do Norte',
+          RS: 'Rio Grande do Sul',
+          RO: 'Rondônia',
+          RR: 'Roraima',
+          SC: 'Santa Catarina',
+          SP: 'São Paulo',
+          SE: 'Sergipe',
+          TO: 'Tocantins',
+        };
+
+        const targetStateName = ufMap[lead.estado.toUpperCase()] || lead.estado;
+
+        await estadoComercial.selectOption({ label: targetStateName }).catch(async () => {
+          const matchingOption = await legacyFrame.evaluate((searchStr: string) => {
             const select = document.getElementById(
               'eventowizard-cliente-estado-comercial',
             ) as HTMLSelectElement;
-            const opt = Array.from(select?.options ?? []).find(
-              (o) =>
-                o.text.toUpperCase() === uf.toUpperCase() ||
-                o.text.toUpperCase().includes(uf.toUpperCase()),
-            );
+            const normSearch = searchStr
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toUpperCase();
+            const opt = Array.from(select?.options ?? []).find((o) => {
+              const normText = o.text
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toUpperCase();
+              return normText === normSearch || normText.includes(normSearch);
+            });
             return opt?.value ?? '';
-          }, lead.estado);
+          }, targetStateName);
+
           if (matchingOption) {
             await estadoComercial.selectOption(matchingOption);
           } else {
-            throw new Error(`Sigla de estado "${lead.estado}" não encontrada no select`);
+            throw new Error(`Estado "${lead.estado}" não encontrado no select do Syonet`);
           }
         });
         await page.waitForTimeout(1000);
       } catch {
         throw new Error(
-          `Não foi possível selecionar o Estado "${lead.estado}" no formulário do Syonet. Verifique se o Estado enviado é uma UF válida (ex: "DF", "SP", "RJ").`,
+          `Não foi possível selecionar o Estado "${lead.estado}" no formulário do Syonet. Verifique se o Estado enviado é uma UF válida (ex: "DF", "SP", "RJ" ou "Distrito Federal").`,
         );
       }
     }
