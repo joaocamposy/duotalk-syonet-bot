@@ -91,22 +91,68 @@ export async function processContactSearchAndSave(
       await tipoLogradouroComercial.selectOption({ index: 1 }).catch(() => {});
     }
 
+    // 1. Selecionar o País Comercial ("Brasil") para carregar os Estados daquela nação
+    const paisComercial = legacyFrame.locator('#eventowizard-cliente-pais-comercial');
+    if (await paisComercial.isVisible()) {
+      await paisComercial.selectOption({ label: 'Brasil' }).catch(async () => {
+        await paisComercial.selectOption({ value: '30' }).catch(() => {});
+      });
+      await page.waitForTimeout(1000);
+    }
+
+    // 2. Selecionar o Estado Comercial (UF)
     const estadoComercial = legacyFrame.locator('#eventowizard-cliente-estado-comercial');
     if (await estadoComercial.isVisible()) {
       try {
-        await estadoComercial.selectOption({ label: lead.estado });
-        await page.waitForTimeout(500);
+        await estadoComercial.selectOption({ label: lead.estado }).catch(async () => {
+          // Tenta selecionar pelo texto da opção que contenha a sigla enviada
+          const matchingOption = await legacyFrame.evaluate((uf: string) => {
+            const select = document.getElementById(
+              'eventowizard-cliente-estado-comercial',
+            ) as HTMLSelectElement;
+            const opt = Array.from(select?.options ?? []).find(
+              (o) =>
+                o.text.toUpperCase() === uf.toUpperCase() ||
+                o.text.toUpperCase().includes(uf.toUpperCase()),
+            );
+            return opt?.value ?? '';
+          }, lead.estado);
+          if (matchingOption) {
+            await estadoComercial.selectOption(matchingOption);
+          } else {
+            throw new Error(`Sigla de estado "${lead.estado}" não encontrada no select`);
+          }
+        });
+        await page.waitForTimeout(1000);
       } catch {
         throw new Error(
-          `Não foi possível selecionar o Estado "${lead.estado}" no formulário do Syonet. Verifique a sigla enviada.`,
+          `Não foi possível selecionar o Estado "${lead.estado}" no formulário do Syonet. Verifique se o Estado enviado é uma UF válida (ex: "DF", "SP", "RJ").`,
         );
       }
     }
 
+    // 3. Selecionar a Cidade Comercial
     const cidadeComercial = legacyFrame.locator('#eventowizard-cliente-cidade-comercial');
     if (await cidadeComercial.isVisible()) {
       try {
-        await cidadeComercial.selectOption({ label: lead.cidade });
+        await cidadeComercial.selectOption({ label: lead.cidade }).catch(async () => {
+          const matchingCidade = await legacyFrame.evaluate((cid: string) => {
+            const select = document.getElementById(
+              'eventowizard-cliente-cidade-comercial',
+            ) as HTMLSelectElement;
+            const opt = Array.from(select?.options ?? []).find(
+              (o) =>
+                o.text.toUpperCase() === cid.toUpperCase() ||
+                o.text.toUpperCase().includes(cid.toUpperCase()),
+            );
+            return opt?.value ?? '';
+          }, lead.cidade);
+          if (matchingCidade) {
+            await cidadeComercial.selectOption(matchingCidade);
+          } else {
+            throw new Error(`Cidade "${lead.cidade}" não encontrada no select`);
+          }
+        });
       } catch {
         throw new Error(
           `Não foi possível selecionar a Cidade "${lead.cidade}" no formulário do Syonet. Verifique o nome da cidade enviado.`,
