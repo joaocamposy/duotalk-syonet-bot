@@ -149,7 +149,44 @@ export async function tryDirectApiLeadProcess(lead: DuotalkLeadData): Promise<bo
         { idCliente: clientId },
         'API DIRECT: Criando oportunidade vinculada ao cliente...',
       );
-      // Oportunidade concluída via API
+
+      if (lead.dryRun) {
+        logger.info(
+          '⚠️ MODO DRY-RUN: Simulação de oportunidade via API REST concluída com sucesso.',
+        );
+        return true;
+      }
+
+      const createEventUrl = `${baseUrl}/api/evento`;
+      const eventPayload = {
+        idCliente: clientId,
+        tipoEvento: lead.qualificacaoLead || 'PROSPECCAO',
+        origem: lead.origem || 'INTERNET',
+        observacao: `Lead recebido via Duotalk (Canal: ${lead.canal || 'Geral'})`,
+      };
+
+      const eventRes = await fetch(createEventUrl, {
+        method: 'POST',
+        headers: {
+          Cookie: cookieHeader,
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/plain, */*',
+        },
+        body: JSON.stringify(eventPayload),
+      });
+
+      if (eventRes.ok) {
+        logger.info(
+          { idCliente: clientId },
+          '🎉 API DIRECT: Oportunidade criada com sucesso no Syonet!',
+        );
+      } else {
+        logger.warn(
+          { status: eventRes.status },
+          'Aviso ao criar evento via API REST. Recorrendo ao navegador.',
+        );
+        return false;
+      }
     }
 
     return true;
