@@ -58,25 +58,33 @@ export async function handleDuotalkWebhook(
     'Recebido webhook de criação de lead do Duotalk',
   );
 
+  const query = request.query as { sync?: string; skipDedup?: string };
+  const isSkipDedupRequested =
+    query?.skipDedup === 'true' ||
+    request.headers['x-skip-dedup'] === 'true' ||
+    leadData.skipDedup === true;
+
   // Chave de desduplicação: usa idConversa / id ou telefone sanitizado
   const dedupKey =
     leadData.idConversa || leadData.id || `phone_${leadData.telefone.replace(/\D/g, '')}`;
 
-  // Verifica se existe um job idêntico recente
-  const duplicateJob = await queueInstance.findDuplicate(dedupKey, env.DEDUP_WINDOW_MINUTES);
+  // Verifica se existe um job idêntico recente (se o bypass não for solicitado)
+  if (!isSkipDedupRequested) {
+    const duplicateJob = await queueInstance.findDuplicate(dedupKey, env.DEDUP_WINDOW_MINUTES);
 
-  if (duplicateJob) {
-    logger.warn(
-      { jobId: duplicateJob.id, dedupKey, status: duplicateJob.status },
-      'Requisição duplicada detectada e ignorada',
-    );
-    return reply.status(200).send({
-      success: true,
-      message: 'Requisição duplicada ignorada (Job idêntico recente já registrado)',
-      jobId: duplicateJob.id,
-      status: duplicateJob.status,
-      duplicate: true,
-    });
+    if (duplicateJob) {
+      logger.warn(
+        { jobId: duplicateJob.id, dedupKey, status: duplicateJob.status },
+        'Requisição duplicada detectada e ignorada',
+      );
+      return reply.status(200).send({
+        success: true,
+        message: 'Requisição duplicada ignorada (Job idêntico recente já registrado)',
+        jobId: duplicateJob.id,
+        status: duplicateJob.status,
+        duplicate: true,
+      });
+    }
   }
 
   const query = request.query as { sync?: string };
