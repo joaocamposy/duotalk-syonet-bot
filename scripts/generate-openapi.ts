@@ -19,6 +19,7 @@ async function generateOpenApiSpec() {
   console.log(`✅ Arquivo OpenAPI JSON salvo em: ${jsonPath}`);
 
   await app.close();
+  process.exit(0);
 }
 
 generateOpenApiSpec().catch((err) => {
