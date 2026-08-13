@@ -1,0 +1,8 @@
+node_modules
+dist
+logs
+data
+coverage
+.git
+.env
+storage_state.json
