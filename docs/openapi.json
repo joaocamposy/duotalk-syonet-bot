@@ -1,0 +1,96 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Duotalk Syonet Bot API",
+    "description": "API Webhook de integração do Duotalk ao Syonet CRM via crawler Playwright",
+    "version": "1.0.0"
+  },
+  "components": {
+    "schemas": {}
+  },
+  "paths": {
+    "/webhook/duotalk": {
+      "post": {
+        "tags": [
+          "Webhook"
+        ],
+        "description": "Recebe os dados do lead do Duotalk / n8n e enfileira para gravação no Syonet CRM",
+        "responses": {
+          "202": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "jobId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": [
+          "Status"
+        ],
+        "description": "Healthcheck e métricas detalhadas da aplicação e da fila",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/queue/status": {
+      "get": {
+        "tags": [
+          "Fila"
+        ],
+        "description": "Estatísticas da fila de processamento de leads",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/queue/jobs/{id}": {
+      "get": {
+        "tags": [
+          "Fila"
+        ],
+        "description": "Consulta o status de um job específico por ID",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    }
+  }
+}
