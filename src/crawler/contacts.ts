@@ -72,7 +72,7 @@ export async function processContactSearchAndSave(
     // Preencher Endereço Comercial (exigido na regra da conta Syonet)
     const cepComercial = legacyFrame.locator('#eventowizard-cliente-cep-comercial');
     if (await cepComercial.isVisible()) {
-      await cepComercial.fill('70000000');
+      await cepComercial.fill(lead.cep || '70000000');
     }
 
     const bairroComercial = legacyFrame.locator('#eventowizard-cliente-bairro-comercial');
@@ -94,13 +94,25 @@ export async function processContactSearchAndSave(
 
     const estadoComercial = legacyFrame.locator('#eventowizard-cliente-estado-comercial');
     if (await estadoComercial.isVisible()) {
-      await estadoComercial.selectOption({ index: 1 }).catch(() => {});
+      if (lead.estado) {
+        await estadoComercial.selectOption({ label: lead.estado }).catch(async () => {
+          await estadoComercial.selectOption({ index: 1 }).catch(() => {});
+        });
+      } else {
+        await estadoComercial.selectOption({ index: 1 }).catch(() => {});
+      }
       await page.waitForTimeout(500);
     }
 
     const cidadeComercial = legacyFrame.locator('#eventowizard-cliente-cidade-comercial');
     if (await cidadeComercial.isVisible()) {
-      await cidadeComercial.selectOption({ index: 1 }).catch(() => {});
+      if (lead.cidade) {
+        await cidadeComercial.selectOption({ label: lead.cidade }).catch(async () => {
+          await cidadeComercial.selectOption({ index: 1 }).catch(() => {});
+        });
+      } else {
+        await cidadeComercial.selectOption({ index: 1 }).catch(() => {});
+      }
     }
 
     // Selecionar Origem (obrigatório — select com id "eventowizard-cliente-origem")

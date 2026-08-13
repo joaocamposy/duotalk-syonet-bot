@@ -23,6 +23,9 @@ export const duotalkLeadDataSchema = z.object({
   url_duotalk: z.string().optional(),
   intencao: z.string().optional(),
   cpf: z.string().optional(),
+  estado: z.string().optional(),
+  cidade: z.string().optional(),
+  cep: z.string().optional(),
 
   // Modo de simulação/demonstração e bypass de desduplicação
   dryRun: z.boolean().optional(),
