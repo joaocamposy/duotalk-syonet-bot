@@ -33,13 +33,18 @@ export function getStoredSessionCookies(url?: string, user?: string): string | n
 }
 
 export async function tryDirectApiLeadProcess(lead: DuotalkLeadData): Promise<boolean> {
-  const cookieHeader = getStoredSessionCookies(lead.syonetUrl, lead.syonetUser);
+  let cookieHeader = getStoredSessionCookies(lead.syonetUrl, lead.syonetUser);
   if (!cookieHeader) {
     logger.info(
       { user: lead.syonetUser || 'env' },
-      'Nenhum cookie de sessão armazenado para este tenant. O Playwright irá realizar o login para obter os cookies.',
+      'Nenhum cookie de sessão armazenado para este tenant. Renovando sessão via headless...',
     );
-    return false;
+    const { loginAndGetCookiesViaHeadless } = await import('./syonet-auth-service.js');
+    cookieHeader = await loginAndGetCookiesViaHeadless(
+      lead.syonetUrl,
+      lead.syonetUser,
+      lead.syonetPass,
+    );
   }
 
   const baseUrl = lead.syonetUrl ? new URL(lead.syonetUrl).origin : 'https://crm.grupoab.com.br';
@@ -47,8 +52,8 @@ export async function tryDirectApiLeadProcess(lead: DuotalkLeadData): Promise<bo
 
   try {
     // 1. Pesquisar cliente via API REST do Syonet
-    const searchUrl = `${baseUrl}/api/cliente?incluiContatos=true&status=ATIVO&telefone=${parsedPhone.fullWithoutDdi}&timeZoneId=America%2FSao_Paulo`;
-    const searchRes = await fetch(searchUrl, {
+
+    let searchRes = await fetch(searchUrl, {
       headers: {
         Cookie: cookieHeader,
         Accept: 'application/json, text/plain, */*',
@@ -56,10 +61,19 @@ export async function tryDirectApiLeadProcess(lead: DuotalkLeadData): Promise<bo
     });
 
     if (searchRes.status === 401 || searchRes.status === 403) {
-      logger.info(
-        'Sessão expirada no CRM Syonet (HTTP 401/403). O Playwright irá renovar a autenticação.',
+      logger.info('Sessão expirada no CRM Syonet (HTTP 401/403). Renovando sessão via headless...');
+      const { loginAndGetCookiesViaHeadless } = await import('./syonet-auth-service.js');
+      cookieHeader = await loginAndGetCookiesViaHeadless(
+        lead.syonetUrl,
+        lead.syonetUser,
+        lead.syonetPass,
       );
-      return false;
+      searchRes = await fetch(searchUrl, {
+        headers: {
+          Cookie: cookieHeader,
+          Accept: 'application/json, text/plain, */*',
+        },
+      });
     }
 
     if (!searchRes.ok) {
