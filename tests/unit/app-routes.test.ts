@@ -80,8 +80,8 @@ describe('HTTP routes', () => {
         '/webhook/duotalk': {
           post: {
             responses: {
-              200: { description: 'Processamento concluído com sucesso' },
-              202: { description: 'Job aceito ou já existente e ainda em processamento' },
+              200: { description: 'Lead processado; resultado disponível' },
+              202: { description: 'Lead aceito para processamento em background' },
               400: { description: 'Payload ou requisição inválida' },
               401: { description: 'Token de acesso ausente ou inválido' },
             },

@@ -99,11 +99,11 @@
         "security": [{ "consumerToken": [] }],
         "responses": {
           "200": {
-            "description": "Processamento concluído com sucesso",
+            "description": "Lead processado; resultado disponível",
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Processamento concluído com sucesso",
+                  "description": "Lead processado; resultado disponível",
                   "type": "object",
                   "required": ["success", "message", "jobId", "status"],
                   "properties": {
@@ -142,11 +142,11 @@
             }
           },
           "202": {
-            "description": "Job aceito ou já existente e ainda em processamento",
+            "description": "Lead aceito para processamento em background",
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Job aceito ou já existente e ainda em processamento",
+                  "description": "Lead aceito para processamento em background",
                   "type": "object",
                   "required": ["success", "message", "jobId", "status"],
                   "properties": {

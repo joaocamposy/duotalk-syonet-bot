@@ -127,8 +127,8 @@ const job = await response.json();
 - Trate `422` como configuração incompatível. Use `errorCode` para distinguir unidade, forma de contato, tipo de evento ou mídia; não repita até corrigir o vínculo ou o de/para.
 - Trate `400` como payload inválido.
 - Trate `429` como limite de chamadas excedido e respeite o intervalo antes de tentar novamente.
-- Trate `200` como processamento concluído; o corpo contém `status: "completed"` e pode indicar `duplicate: true` quando o resultado já existia.
-- Trate `202` como job novo aceito ou job duplicado ainda pendente/em processamento. Preserve o `jobId` e consulte seu status.
+- Trate `200` como lead processado e resultado disponível; o corpo contém `status: "completed"` e pode indicar `duplicate: true` quando o resultado já existia.
+- Trate `202` como lead aceito para processamento em background. Preserve o `jobId` e consulte seu status.
 - Trate `503` como indisponibilidade temporária ou backpressure da fila. O reenvio é seguro somente quando a resposta não trouxe `jobId`; aplique atraso exponencial.
 
 ## Responsabilidades deste microsserviço

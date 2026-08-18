@@ -152,9 +152,12 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
         },
       },
       response: {
-        200: describedResponse('Processamento concluído com sucesso', jobAcceptanceResponseSchema),
+        200: describedResponse(
+          'Lead processado; resultado disponível',
+          jobAcceptanceResponseSchema,
+        ),
         202: describedResponse(
-          'Job aceito ou já existente e ainda em processamento',
+          'Lead aceito para processamento em background',
           jobAcceptanceResponseSchema,
         ),
         400: describedResponse('Payload ou requisição inválida', requestErrorResponseSchema),
