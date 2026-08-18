@@ -6,7 +6,7 @@ Todas as mudanças relevantes deste projeto são registradas neste arquivo.
 
 ### Alterado
 
-- Substituição integral da automação Playwright pela integração HTTP com o Syonet.
+- Integração HTTP direta com o Syonet.
 - Credenciais e URL do Syonet passam a ser recebidas por requisição no objeto `credentials`.
 - Unidade de destino passa a ser obrigatória em `target.companyId` e é validada antes de qualquer pesquisa ou escrita.
 - Fila em arquivo passa a usar persistência atômica, limite de capacidade, retenção e recuperação conservadora após falhas.
@@ -30,7 +30,6 @@ Todas as mudanças relevantes deste projeto são registradas neste arquivo.
 
 ### Removido
 
-- Playwright, Chromium, automação de DOM, screenshots e persistência de sessão em disco.
 - Variáveis `SYONET_URL`, `SYONET_USER` e `SYONET_PASS` do ambiente do microsserviço.
 - Drivers e fallbacks anunciados, mas não implementados.
 - Campos fabricados que não existem no payload de referência do Duotalk.

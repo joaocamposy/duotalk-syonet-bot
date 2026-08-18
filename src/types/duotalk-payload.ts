@@ -45,9 +45,6 @@ export const duotalkLeadDataSchema = z.object({
 });
 
 export const duotalkWebhookSchema = z.object({
-  method: optionalText(20),
-  url: optionalText(2_048),
-  headers: z.record(z.string()).optional(),
   credentials: syonetCredentialsSchema,
   target: syonetTargetSchema,
   data: duotalkLeadDataSchema,

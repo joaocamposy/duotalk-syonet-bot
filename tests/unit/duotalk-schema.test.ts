@@ -4,9 +4,6 @@ import { duotalkWebhookSchema, duotalkLeadDataSchema } from '../../src/types/duo
 describe('Duotalk Payload Schema Validation', () => {
   it('deve validar com sucesso o payload completo do exemplo do Duotalk', () => {
     const rawPayload = {
-      method: 'POST',
-      url: 'https://webhook.example.com/duotalk',
-      headers: { 'Content-Type': 'application/json' },
       credentials: {
         url: 'https://crm.example.com',
         username: 'usuario',
@@ -20,19 +17,12 @@ describe('Duotalk Payload Schema Validation', () => {
         canal: 'WhatsApp 360',
         qualificacaoLead: 'Lead',
         intermediario: 'Duotalk',
-        nomeChatbot: 'Geely',
-        tipoIntegracao: 'abertura',
-        triggerType: 1,
         operador: 'Operador Exemplo',
-        operadorId: '6a4c0f8062154***',
-        operadorEmail: 'operador@example.com',
         nome: 'Cliente Exemplo',
         telefone: '5561999998888',
         email: 'cliente@example.com',
         mensagem: 'Mensagem: Conversa criada manualmente \n',
         messageHistory: 'Mensagem: Conversa criada manualmente',
-        integrationIdValue: null,
-        integrationEmailValue: null,
         url_duotalk:
           'https://app.duotalk.io/apps/inbox/start-conversation?name=Cliente%20Exemplo&phone=5561999998888',
         firstMessage: '',
@@ -46,13 +36,6 @@ describe('Duotalk Payload Schema Validation', () => {
     expect(parsed.data.intencao).toBe('DVNU - Veículos Novos');
     expect(parsed.data.firstMessage).toBe('');
     expect(parsed.target.companyId).toBe(25);
-    expect(parsed.data).not.toHaveProperty('nomeChatbot');
-    expect(parsed.data).not.toHaveProperty('tipoIntegracao');
-    expect(parsed.data).not.toHaveProperty('triggerType');
-    expect(parsed.data).not.toHaveProperty('operadorId');
-    expect(parsed.data).not.toHaveProperty('operadorEmail');
-    expect(parsed.data).not.toHaveProperty('integrationIdValue');
-    expect(parsed.data).not.toHaveProperty('integrationEmailValue');
   });
 
   it('deve aceitar payload direto de lead sem o envelope data', () => {

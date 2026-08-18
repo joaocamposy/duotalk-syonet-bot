@@ -76,8 +76,7 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
   // Webhook Duotalk
   fastify.post('/webhook/duotalk', {
     schema: {
-      description:
-        'Recebe os dados do lead do Duotalk / n8n e enfileira para gravação no Syonet CRM',
+      description: 'Recebe os dados do lead do Duotalk e enfileira para gravação no Syonet CRM',
       tags: ['Webhook'],
       security: [{ consumerToken: [] }],
       querystring: {

@@ -1,6 +1,6 @@
 # Especificação do Payload do Webhook Duotalk
 
-Documentação técnica do formato de payload enviado pelo Duotalk / n8n para a API.
+Documentação técnica do formato de payload enviado pelo Duotalk para a API.
 
 ## Endpoint
 
@@ -14,11 +14,6 @@ O Bearer autoriza o uso do microsserviço e não contém o login do Syonet. As c
 
 ```json
 {
-  "method": "POST",
-  "url": "https://webhook.example.com/duotalk",
-  "headers": {
-    "Content-Type": "application/json"
-  },
   "credentials": {
     "url": "https://seu-tenant.syonet.com",
     "username": "usuario-tecnico",
@@ -35,19 +30,12 @@ O Bearer autoriza o uso do microsserviço e não contém o login do Syonet. As c
     "canal": "WhatsApp 360",
     "qualificacaoLead": "Lead",
     "intermediario": "Duotalk",
-    "nomeChatbot": "Geely",
-    "tipoIntegracao": "abertura",
-    "triggerType": 1,
     "operador": "Operador Exemplo",
-    "operadorId": "6a4c0f8062154***",
-    "operadorEmail": "operador@example.com",
     "nome": "Cliente Exemplo",
     "telefone": "5561999998888",
     "email": "cliente@example.com",
     "mensagem": "Mensagem: Conversa criada manualmente \n",
     "messageHistory": "Mensagem: Conversa criada manualmente \n",
-    "integrationIdValue": null,
-    "integrationEmailValue": null,
     "url_duotalk": "Inicie a conversa: https://app.duotalk.io/apps/inbox/start-conversation?name=Cliente%20Exemplo&phone=5561999998888",
     "firstMessage": "",
     "intencao": "DVNU - Veículos Novos"
@@ -69,7 +57,5 @@ O Bearer autoriza o uso do microsserviço e não contém o login do Syonet. As c
 - `operador` (Opcional, ex: "Jessica Helaine")
 - `firstMessage` (Opcional; primeira mensagem da conversa, limitada a 10.000 caracteres)
 - `dryRun` (Opcional; quando `true`, autentica, pesquisa e valida os de/para sem executar `POST` no Syonet)
-
-O Duotalk pode continuar enviando os demais campos do payload de referência. Como eles não participam da integração atual, `nomeChatbot`, `tipoIntegracao`, `triggerType`, `operadorId`, `operadorEmail`, `integrationIdValue` e `integrationEmailValue` são aceitos como propriedades adicionais, mas descartados durante a validação e não entram na fila nem no Syonet.
 
 `mensagem`, `firstMessage`, `messageHistory` e `url_duotalk` compõem a observação da oportunidade. O serviço aceita até 50.000 caracteres de histórico, mas retém somente os primeiros 8.000, limite aproveitável pela observação. Parâmetros sensíveis conhecidos em URLs são substituídos por `[REDACTED]` antes da persistência.

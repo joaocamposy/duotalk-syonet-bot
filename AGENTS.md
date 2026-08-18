@@ -6,7 +6,7 @@ Este documento fornece as regras, convenções e orientações técnicas para qu
 
 ## 1. Visão Geral do Projeto
 
-API webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads e credenciais por cliente do **Duotalk / n8n**, protege o login na fila e usa HTTP para pesquisar ou criar contatos no **Syonet CRM** e registrar Oportunidades.
+API webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads e credenciais por cliente do **Duotalk**, protege o login na fila e usa HTTP para pesquisar ou criar contatos no **Syonet CRM** e registrar Oportunidades.
 
 ---
 
@@ -45,7 +45,7 @@ API webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads e cred
 1. **Nome de Arquivos e Pastas**: Sempre em `kebab-case` (ex: `phone-parser.ts`, `lead-controller.ts`).
 2. **Variáveis e Funções**: Sempre em `camelCase` (ex: `parsePhoneNumber`, `handleDuotalkWebhook`).
 3. **Classes, Interfaces e Tipos**: Sempre em `PascalCase` (ex: `FileQueueDriver`, `DuotalkLeadData`).
-4. **Constantes Globais**: Sempre em `UPPER_SNAKE_CASE` (ex: `STORAGE_STATE_PATH`).
+4. **Constantes Globais**: Sempre em `UPPER_SNAKE_CASE` (ex: `QUEUE_FILE_PATH`).
 5. **Tipagem Estrita**: É **proibido** utilizar `any` explícito. Use Zod ou interfaces TypeScript.
 
 ---

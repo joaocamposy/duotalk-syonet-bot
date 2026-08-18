@@ -1,6 +1,6 @@
 # Duotalk -> Syonet CRM Integration Bot 🤖
 
-API Webhook em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** (via n8n) e usa as rotas HTTP do **Syonet CRM** para pesquisar clientes, cadastrar contatos e registrar oportunidades.
+API Webhook em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** e usa as rotas HTTP do **Syonet CRM** para pesquisar clientes, cadastrar contatos e registrar oportunidades.
 
 ---
 
