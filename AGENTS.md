@@ -56,7 +56,7 @@ Se for necessário adicionar uma nova funcionalidade ou ajustar contratos/rotas 
 
 1. Mantenha os testes existentes passando (`npm test`).
 2. Adicione novos testes unitários para novas funções utilitárias ou regras de validação Zod.
-3. Se modificar alguma decisão arquitetural, crie ou atualize um registro em `docs/adr/`.
+3. Se modificar contratos ou comportamento operacional, atualize a documentação permanente correspondente em `docs/`.
 4. Antes de concluir, execute obrigatoriamente:
    ```bash
    npm run lint

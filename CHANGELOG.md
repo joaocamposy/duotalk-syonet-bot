@@ -39,4 +39,3 @@ Todas as mudanças relevantes deste projeto são registradas neste arquivo.
 
 - Suíte automatizada, cobertura mínima obrigatória, lint, formatação e compilação TypeScript.
 - Contrato OpenAPI regenerado a partir das rotas.
-- Auditoria integral e red team documentados em `docs/audit-2026-08-14.md`.

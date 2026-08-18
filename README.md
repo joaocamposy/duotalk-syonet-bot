@@ -118,7 +118,5 @@ npm run format
 - 🤝 [Guia para sistemas consumidores](docs/consumer-integration.md)
 - 🔌 [Integração HTTP com o Syonet](docs/syonet-crawler.md)
 - 🚀 [Guia de Deploy & Docker](docs/deployment.md)
-- 📑 [Registros de Decisão de Arquitetura (ADRs)](docs/adr/)
 - 📝 [Histórico de mudanças](CHANGELOG.md)
-- 🛡️ [Red team com Claude Opus](docs/red-team-claude-2026-08-18.md)
 - 🤖 [Guia de Governança AGENTS.md](AGENTS.md)
