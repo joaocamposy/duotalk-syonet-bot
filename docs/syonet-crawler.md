@@ -1,41 +1,57 @@
-# Automação Syonet CRM com Playwright
+# Integração HTTP com o Syonet CRM
 
-Documentação técnica do fluxo de navegação automatizada no painel do Syonet.
+O serviço usa as mesmas rotas HTTP consumidas pelo portal oficial do Syonet. Não há navegador ou automação de DOM no fluxo.
 
-## Arquitetura de Interface do Syonet CRM
+## Proteção das credenciais
 
-O Syonet CRM utiliza uma arquitetura híbrida:
-- **Shell Principal**: SPA React/MUI (Login em `#login` / `#password`).
-- **Conteúdo Operacional**: Iframe legado AngularJS com `name="home"` e `id="legacy-app"` rodando em `#/cic.do`.
+1. `Authorization: Bearer` autentica o sistema que consome o microsserviço.
+2. O objeto `credentials` traz URL, usuário e senha do Syonet por uma conexão HTTPS.
+3. O controller valida os valores e os cifra imediatamente com AES-256-GCM.
+4. A fila persiste as credenciais somente como IV, texto cifrado e tag de autenticação. Enquanto o job está pendente, os dados do lead permanecem no arquivo protegido por modo `0600` e pela criptografia do volume.
+5. O worker descriptografa o envelope em memória e executa o login. A fila remove o envelope e o payload pessoal quando o job termina, com sucesso ou falha definitiva.
 
-Todas as operações de formulários, buscas e cadastros ocorrem exclusivamente **dentro do contexto deste iframe**.
+O consumidor também envia `target.companyId`, fora do objeto `data`. Imediatamente após o login, o serviço consulta `/api/sessao/empresa`. Se a empresa ativa for diferente, encerra o job com `SYONET_COMPANY_ACCESS_DENIED` antes de pesquisar ou gravar dados.
 
-## Fluxo de Automação (`src/crawler/`)
+Objeto recebido:
 
-1. **Autenticação & Sessão (`auth.ts`)**:
-   - Tenta abrir o painel `https://crm.grupoab.com.br/portal/acessaSistema.do`.
-   - Se a sessão expirou ou não há cookies em `data/storage_state.json`, realiza login via `#login` / `#password` e `button.MuiButton-containedPrimary`.
+```json
+{
+  "url": "https://crm.example.com",
+  "username": "usuario-tecnico",
+  "password": "senha",
+  "version": "7"
+}
+```
 
-2. **Pesquisa Prévia & Cadastro (`contacts.ts`)**:
-   - Acessa o iframe `name="home"`.
-   - Clica no botão **"Pesquisar clientes"** (`a:has-text("Pesquisar clientes")`).
-   - Seleciona a opção de busca por **Telefone** via label `label[for="eventowizard-search-option-tel"]` (pois os inputs radio são ocultos via CSS).
-   - Digita DDD + Número no input `input[placeholder="Pesquisar clientes..."]` (ex: `61999990001`).
-   - **CENÁRIO A (Sem Resultados)**:
-     - Detecta a mensagem `"Nenhum cliente encontrado"`.
-     - Clica em **"Criar cliente"**.
-     - Preenche Nome (`#eventowizard-cliente-nome`), E-mail (`#eventowizard-cliente-email`), CPF (`#eventowizard-cliente-cpfcnpj`), Origem (`#eventowizard-cliente-origem`) e os campos de Endereço Comercial obrigatórios.
-     - Clica em **"Criar cliente"** (`button.syo-success`).
-   - **CENÁRIO B (Com Resultados)**:
-     - Clica no primeiro registro retornado na lista do wizard para vincular a oportunidade.
+`version` é opcional e permite forçar a invalidação lógica do cache. Mudanças no usuário ou na senha já geram outra chave de cache. A chave `CREDENTIAL_ENCRYPTION_KEY` protege somente o trânsito temporário pela fila; ela não substitui o gerenciamento das credenciais feito pelo sistema consumidor.
 
-3. **Execução de Teste Manual / Visual**:
-   - Para rodar a automação visualmente com navegador aberto:
-     ```bash
-     npm run test:lead
-     ```
+## Autenticação
 
-## Screenshots & Log Retention
-- Screenshots de erro são salvas automaticamente em `logs/screenshots/job-{jobId}-error.png`.
-- Logs e screenshots têm auto-purge configurável via `LOG_RETENTION_DAYS`.
+1. `GET /portal/app.do?modulo=login` inicia a sessão e fornece `JSESSIONID`.
+2. `GET /api/parametro/PUB_PEM` obtém a chave pública do tenant.
+3. Usuário e senha são criptografados com RSA-OAEP/SHA-1.
+4. `POST /portal/validarLogonUsuario.do?opcaoAtualizacao` autentica e devolve os cookies.
+5. `GET /api/sessao/usuario` confirma que a sessão está válida.
 
+Os cookies ficam somente na memória. Uma resposta `401`, `403` ou redirect inesperado renova a sessão uma vez somente em leituras. Nenhum `POST` de escrita no CRM é repetido automaticamente, inclusive após rejeição de autenticação, timeout, falha de rede, redirect ou resposta inválida; o resultado exige conciliação conservadora. O `POST` de login, que não cria registros, pode ser repetido após falha transitória do servidor.
+
+Todas as chamadas usam `SYONET_HTTP_TIMEOUT_MS`. Redirecionamentos inesperados em leituras provocam uma renovação da sessão; depois de uma escrita, são tratados como resultado ambíguo e não são repetidos. As respostas são validadas antes de seus IDs ou metadados serem usados.
+
+## Processamento do lead
+
+1. Valida a empresa ativa da sessão contra `target.companyId`.
+2. Pesquisa o cliente por telefone em `GET /api/cliente` e exige correspondência exata no cadastro retornado.
+3. Consulta usuário, formas de contato, tipos de evento e mídias permitidas antes de qualquer escrita.
+4. Se o cliente não existir, cria em `POST /api/cliente` com o formato nativo do Syonet.
+5. Resolve forma de contato, tipo de oportunidade e mídia pelas regras centralizadas em `src/config/syonet-mappings.ts`.
+6. Cria a oportunidade em `POST /api/evento` e retorna `companyId`, `idCliente` e `idEvento`.
+
+Clientes existentes não são sobrescritos automaticamente. Com `dryRun: true`, o serviço autentica, pesquisa o cliente, consulta as opções do tenant e valida todo o de/para, mas não executa nenhum `POST`. O resultado informa em `mapping` a forma de contato, o grupo/tipo de evento e a mídia que seriam usados.
+
+O cadastro envia ao Syonet somente os dados disponíveis no payload de referência do Duotalk e usa `validateFields: false` para permitir o cadastro parcial.
+
+Os de/para atuais são provisórios e deliberadamente conservadores. A forma de contato tenta `canal`, depois `origem` e somente aliases declarados; o tipo de evento usa `qualificacaoLead` e `intencao`; a mídia usa `intermediario`. Não existe fallback silencioso. Se o Syonet não oferecer uma opção confirmada, o fluxo falha antes de criar cliente ou oportunidade. Na validação funcional, somente o arquivo de configuração de mapeamentos deve ser alterado.
+
+Textos usados na observação do evento são limitados e URLs têm parâmetros sensíveis conhecidos, como `token` e `access_token`, redigidos antes da fila e novamente antes do envio ao CRM.
+
+Uma falha de rede após iniciar `POST /api/cliente` ou `POST /api/evento` é considerada ambígua. O job não é repetido automaticamente, evitando duplicação; ele deve ser conciliado usando os dados do CRM e o identificador da conversa.

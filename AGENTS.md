@@ -6,31 +6,36 @@ Este documento fornece as regras, convenções e orientações técnicas para qu
 
 ## 1. Visão Geral do Projeto
 
-API webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads do **Duotalk / n8n** e executa um crawler headless em **Playwright** para pesquisar, criar/atualizar contatos no **Syonet CRM** e registrar Oportunidades (Eventos).
+API webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads e credenciais por cliente do **Duotalk / n8n**, protege o login na fila e usa HTTP para pesquisar ou criar contatos no **Syonet CRM** e registrar Oportunidades.
 
 ---
 
 ## 2. Estrutura de Pastas e Responsabilidades
 
 - `src/config/env.ts`: Schema Zod e carregamento de variáveis de ambiente.
+- `src/config/syonet-mappings.ts`: Único ponto dos de/para funcionais entre Duotalk e Syonet.
 - `src/types/duotalk-payload.ts`: Schemas Zod de entrada e tipos TypeScript do payload Duotalk.
+- `src/types/syonet-target.ts`: Schema do destino Syonet informado fora do payload Duotalk.
 - `src/utils/`:
   - `phone-parser.ts`: Higienização e separação de DDI (55), DDD e número.
-  - `logger.ts`: Logger estruturado em JSON via Pino.
-  - `log-purger.ts`: Auto-purge periódico de arquivos de logs e screenshots antigos.
+  - `allowed-host.ts`: Validação da allowlist de hostnames Syonet exatos.
+  - `logger.ts`: Logs JSON em stdout com redação de segredos para coleta pela plataforma.
+  - `sensitive-text.ts`: Redação de tokens presentes em URLs recebidas nos textos do lead.
+- `src/auth/microservice-auth.ts`: Autorização Bearer dos sistemas consumidores.
+- `src/credentials/credential-envelope.ts`: Validação e criptografia AES-256-GCM do login Syonet.
 - `src/queue/`:
   - `types.ts`: Interfaces de `QueueDriver`, `LeadJob` e estatísticas.
   - `drivers/memory-queue-driver.ts`: Driver de fila em memória.
-  - `drivers/file-queue-driver.ts`: Driver de fila em arquivo JSON (`data/queue.json`) com autorrecuperação pós-crash.
+  - `drivers/file-queue-driver.ts`: Driver de fila em arquivo JSON (`data/queue.json`) com recuperação conservadora pós-crash.
   - `queue-manager.ts`: Factory de filas selecionável por `.env` (`QUEUE_DRIVER`).
 - `src/crawler/`:
-  - `syonet-browser.ts`: Gerenciamento do Chromium, cookies (`storage_state.json`) e screenshots de erro.
-  - `auth.ts`: Login no Syonet e renovação de sessão.
-  - `contacts.ts`: Pesquisa por telefone, validação (Cenário A vs Cenário B), criação e atualização de contatos.
-  - `events.ts`: Lançamento do Novo Evento / Oportunidade.
-  - `syonet-crawler.ts`: Orquestrador principal da automação.
+  - `syonet-auth-service.ts`: Login RSA por HTTP, cookies e validação da sessão.
+  - `syonet-api-client.ts`: Pesquisa/criação de cliente e registro da oportunidade via HTTP.
+  - `syonet-mapping.ts`: Seleção fail-closed de forma de contato, tipo de evento e mídia.
+  - `syonet-crawler.ts`: Orquestrador do processamento de cada job.
 - `src/controllers/lead-controller.ts`: Endpoints HTTP do webhook e consulta da fila.
 - `src/routes/lead-routes.ts`: Rotas Fastify e Swagger.
+- `src/shutdown/graceful-shutdown.ts`: Encerramento HTTP e espera limitada dos jobs ativos.
 - `src/app.ts` & `src/server.ts`: Inicialização, middlewares e Graceful Shutdown.
 
 ---
@@ -47,7 +52,8 @@ API webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads do **D
 
 ## 4. Fluxo de Trabalho e Modificações
 
-Se for necessário adicionar uma nova funcionalidade ou ajustar seletores do Syonet:
+Se for necessário adicionar uma nova funcionalidade ou ajustar contratos/rotas do Syonet:
+
 1. Mantenha os testes existentes passando (`npm test`).
 2. Adicione novos testes unitários para novas funções utilitárias ou regras de validação Zod.
 3. Se modificar alguma decisão arquitetural, crie ou atualize um registro em `docs/adr/`.

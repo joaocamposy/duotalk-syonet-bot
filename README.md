@@ -1,6 +1,6 @@
 # Duotalk -> Syonet CRM Integration Bot 🤖
 
-API Webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads do **Duotalk** (via n8n) e executa um crawler headless em **Playwright** para pesquisar, cadastrar/atualizar contatos e registrar Oportunidades no **Syonet CRM**.
+API Webhook em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** (via n8n) e usa as rotas HTTP do **Syonet CRM** para pesquisar clientes, cadastrar contatos e registrar oportunidades.
 
 ---
 
@@ -9,44 +9,74 @@ API Webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads do **D
 - 📞 **Tratamento de Telefone**: Extração automática do DDI (`55`), separação de DDD e número (com e sem hífen).
 - 🔄 **Busca Prévia Inteligente**:
   - **Cenário A (Contato Inexistente)**: Preenche e cadastra novo contato.
-  - **Cenário B (Contato Existente)**: Valida divergências de Nome/Email e atualiza os dados se estiverem incompletos ou desatualizados.
-- 🎯 **Criação de Oportunidade (Novo Evento)**: Registra o evento no CRM vinculado ao contato recém-criado/atualizado.
+  - **Cenário B (Contato Existente)**: Reutiliza o cadastro localizado sem sobrescrever dados do cliente.
+- 🎯 **Criação de Oportunidade (Novo Evento)**: Registra o evento no CRM vinculado ao contato criado ou localizado.
 - ⚡ **Modos de Execução**: Suporte a processamento **Assíncrono via Fila** (padrão 202 Accepted) e **Síncrono sob demanda** (`?sync=true`).
-- 🔄 **Desduplicação Inteligente (Dedup)**: Ignora requisições idênticas recentes por `idConversa` ou `telefone` dentro da janela configurável (`DEDUP_WINDOW_MINUTES`).
+- 🔄 **Desduplicação por tenant**: Ignora requisições repetidas por `idConversa`, `id` ou telefone sem confundir tenants Syonet diferentes.
 - 🛑 **Rate Limit**: Proteção contra inundações via `@fastify/rate-limit` configurável no `.env`.
-- 📦 **Sistema de Filas Pluggable**: Suporte aos drivers `memory` e `file` (persistência em disco que resiste a crashes) e extensível a `redis`.
-- 📸 **Debugging Visual**: Captura automática de screenshot em `logs/screenshots/` em caso de erro na navegação do Playwright.
-- 🧹 **Auto-Purge de Logs**: Limpeza automática de arquivos de log e capturas antigas configurável por dias.
-- 🐳 **Docker Ready**: Imagem multi-stage baseada no Playwright oficial e `docker-compose.yml`.
-- 📚 **Swagger Interativo**: Documentação viva acessível em `/docs`.
+- 📦 **Sistema de Filas Pluggable**: Suporte explícito aos drivers `memory` e `file`, sem fallback silencioso para tecnologias não implementadas.
+- 🔐 **Login HTTP criptografado**: Reproduz o fluxo RSA-OAEP e renova a sessão somente ao repetir leituras seguras.
+- 🗝️ **Credenciais protegidas**: Recebe o login do Syonet por HTTPS e o criptografa antes de persistir o job.
+- 🧱 **Destinos permitidos**: Restringe as URLs por requisição aos hosts autorizados no deploy.
+- 🏬 **Unidade explícita**: Valida `target.companyId` contra a empresa ativa da sessão antes de qualquer operação no CRM.
+- 🧭 **De/para isolado e seguro**: Regras provisórias ficam em um único arquivo e valores desconhecidos interrompem o job antes de qualquer escrita.
+- 🧾 **Logs estruturados**: Saída JSON em stdout com redação automática de credenciais.
+- 🐳 **Docker Ready**: Imagem multi-stage enxuta baseada em Node.js 20 e `docker-compose.yml`.
+- 📚 **Swagger Interativo**: Documentação viva acessível em `/docs` somente fora de produção.
 
 ---
 
 ## 🚀 Como Executar
 
 ### 1. Requisitos
+
 - Node.js >= 20
 - npm ou docker
 
 ### 2. Configuração do `.env`
+
 Copie o arquivo de exemplo e preencha as variáveis de ambiente:
+
 ```bash
 cp .env.example .env
 ```
 
-### 3. Instalação de Dependências & Playwright
+Configure o token dos consumidores e uma chave independente para criptografar a fila:
+
+```env
+MICROSERVICE_API_TOKEN=gere-um-token-aleatorio-forte
+CREDENTIAL_ENCRYPTION_KEY=gere-com-openssl-rand-base64-32
+SYONET_ALLOWED_HOSTS=crm.cliente-a.example.com,crm.cliente-b.example.com
+```
+
+O sistema consumidor usa o token no header:
+
+```http
+Authorization: Bearer <MICROSERVICE_API_TOKEN>
+```
+
+URL, usuário e senha do Syonet são enviados no objeto `credentials`. Antes do job ser persistido, esses valores são protegidos com AES-256-GCM e removidos do payload do lead.
+
+`SYONET_ALLOWED_HOSTS` aceita apenas hostnames exatos. Curingas, IPs, portas e URLs completas são rejeitados.
+
+Até a validação funcional, os de/para ficam centralizados em `src/config/syonet-mappings.ts`. Alterações de forma de contato, tipo de oportunidade ou mídia não exigem mudanças no fluxo HTTP nem na fila.
+
+### 3. Instalação de Dependências
+
 ```bash
-npm install
-npx playwright install chromium
+npm ci
 ```
 
 ### 4. Execução em Desenvolvimento
+
 ```bash
 npm run dev
 ```
+
 Acesse a documentação Swagger em: `http://localhost:3000/docs`
 
 ### 5. Execução via Docker
+
 ```bash
 docker compose up --build
 ```
@@ -59,8 +89,16 @@ docker compose up --build
 # Rodar suíte de testes unitários com Vitest
 npm test
 
-# Executar teste visual interativo da automação Syonet
-npm run test:lead
+# Rodar testes com relatório e limites mínimos de cobertura
+npm run test:coverage
+
+# Enviar um payload completo para o microsserviço local
+# O JSON deve conter credentials, target e data; use dryRun=true para validar
+# unidade, pesquisa e de/para sem executar nenhum POST no Syonet.
+npm run test:lead < payload.local.json
+
+# Somente para a gravação real controlada, após conferir o dry-run:
+ALLOW_WRITE_TEST=true npm run test:lead < payload.local.json
 
 # Verificar regras do ESLint
 npm run lint
@@ -69,13 +107,18 @@ npm run lint
 npm run format
 ```
 
+`test:lead` carrega o `.env` automaticamente e bloqueia payloads sem `data.dryRun=true`. A variável de liberação vale somente para o comando local de teste; ela não altera a proteção do endpoint.
+
 ---
 
 ## 📑 Documentação Detalhada (`docs/`)
 
 - 📐 [Arquitetura & Filas](docs/architecture.md)
 - 📩 [Payload do Webhook Duotalk](docs/webhook-payload.md)
-- 🤖 [Crawler Syonet CRM & Seletores](docs/syonet-crawler.md)
+- 🤝 [Guia para sistemas consumidores](docs/consumer-integration.md)
+- 🔌 [Integração HTTP com o Syonet](docs/syonet-crawler.md)
 - 🚀 [Guia de Deploy & Docker](docs/deployment.md)
 - 📑 [Registros de Decisão de Arquitetura (ADRs)](docs/adr/)
+- 📝 [Histórico de mudanças](CHANGELOG.md)
+- 🛡️ [Red team com Claude Opus](docs/red-team-claude-2026-08-18.md)
 - 🤖 [Guia de Governança AGENTS.md](AGENTS.md)

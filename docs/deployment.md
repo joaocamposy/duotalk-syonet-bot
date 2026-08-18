@@ -4,21 +4,42 @@ Orientações para colocar o serviço em produção.
 
 ## 1. Deploy via Docker (Recomendado)
 
-O projeto possui um `Dockerfile` multi-stage baseado na imagem oficial do Playwright (`mcr.microsoft.com/playwright:v1.50.0-noble`), garantindo a presença de todas as dependências gráficas e navegadores necessários.
+O projeto possui um `Dockerfile` multi-stage baseado no Node.js 20. A integração usa somente HTTP e não instala navegador ou dependências gráficas.
 
 ```bash
 docker compose up --build -d
 ```
 
+O Compose usa um volume nomeado para `data/queue.json`, evitando depender das permissões de uma pasta do host. O conteúdo persiste entre recriações do container enquanto o volume não for removido. Jobs pendentes contêm dados pessoais em claro e exigem volume e backups criptografados; jobs terminais têm o payload removido.
+
 ## 2. Variáveis de Ambiente Críticas
 
 - `NODE_ENV=production`
-- `HEADLESS=true`
-- `QUEUE_DRIVER=file` (ou `redis` se houver infraestrutura Redis disponível)
-- `LOG_RETENTION_DAYS=7` (Define a retenção de logs para o auto-purge)
+- `TZ=America/Sao_Paulo`: mantém o cálculo da próxima ação no fuso comercial esperado.
+- `MICROSERVICE_API_TOKEN`: token Bearer compartilhado somente com os sistemas consumidores autorizados.
+- `CREDENTIAL_ENCRYPTION_KEY`: chave de 32 bytes em Base64 usada para proteger o login do Syonet na fila. Gere com `openssl rand -base64 32`.
+- `SYONET_ALLOWED_HOSTS`: hostnames Syonet exatos, separados por vírgula, como `crm.cliente-a.example.com,crm.cliente-b.example.com`. Curingas, IPs, portas e URLs completas são proibidos. Esta variável limita destinos de rede; cada chamada ainda envia sua própria URL e suas credenciais.
+- `SYONET_HTTP_TIMEOUT_MS=15000`: limite de cada chamada ao CRM.
+- `SYNC_TIMEOUT_MS=60000`: após esse período, a resposta síncrona volta a ser assíncrona sem cancelar o job.
+- `SHUTDOWN_TIMEOUT_MS=30000`: tempo para concluir jobs ativos antes de encerrar o processo.
+- `QUEUE_RETRY_BASE_DELAY_MS=1000`: base do atraso exponencial para falhas seguramente repetíveis.
+- `QUEUE_MAX_JOBS=1000`: limite absoluto de jobs mantidos. Ao atingir o limite, jobs terminais antigos são removidos primeiro; se todos ainda estiverem ativos, novos leads recebem `503`.
+- `QUEUE_DRIVER=file` para persistência local ou `memory` para execução efêmera.
+- `JOB_RETENTION_DAYS=7`: remove jobs concluídos ou falhos e seus dados pessoais após a retenção.
+- `LOG_LEVEL=info`: nível dos logs estruturados enviados para stdout.
 
-## 3. Retenção de Logs & Auto-Purge
+Use um grace period do orquestrador maior que `SHUTDOWN_TIMEOUT_MS`. O Compose fornece 45 segundos para o padrão de 30 segundos. Ao receber `SIGTERM`, o serviço deixa de aceitar novas conexões, fecha as ociosas, para de retirar jobs e preserva requisições e jobs ativos até o limite. Ao final do prazo, as conexões restantes são encerradas. Jobs pendentes ficam no driver `file` para o próximo start; pendências no driver `memory` são explicitamente reportadas e serão perdidas.
 
-O módulo `src/utils/log-purger.ts` executa um purger diário que remove automaticamente:
-- Logs `.log` em `logs/` com mtime superior a `LOG_RETENTION_DAYS`.
-- Screenshots `.png` de erros com mtime superior a `LOG_RETENTION_DAYS`.
+### Recuperação de uma fila inválida
+
+O driver `file` interrompe a inicialização se `data/queue.json` estiver vazio, malformado ou inconsistente. Isso é intencional: substituir a fila automaticamente poderia apagar leads sem aviso. Preserve uma cópia do volume, valide o JSON e restaure a última versão íntegra do backup. Se não houver backup, a decisão de remover ou reconstruir o arquivo exige conciliação dos jobs com o Syonet; não apague o volume como tentativa automática de recuperação.
+
+O Compose publica a porta apenas em `127.0.0.1`. Exponha o serviço por um proxy HTTPS ou pela rede interna do orquestrador. O Swagger não é registrado quando `NODE_ENV=production`.
+
+### Rotação da chave de criptografia
+
+`CREDENTIAL_ENCRYPTION_KEY` também deriva, com separação de domínio, a chave usada nos fingerprints de deduplicação. Antes de rotacioná-la, pause novos envios, deixe a fila persistida sem jobs pendentes e preserve o inventário de jobs recentes. Após a troca, fingerprints antigos não reconhecem novos retries; concilie identificadores ainda dentro da janela de deduplicação para evitar uma gravação repetida. A rotação do login do Syonet é independente e não altera esses fingerprints.
+
+## 3. Logs
+
+Os logs JSON são enviados para stdout. A plataforma de containers deve aplicar coleta, acesso e retenção. Credenciais, Authorization e envelopes criptografados são redigidos pelo logger.
