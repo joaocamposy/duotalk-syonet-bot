@@ -80,7 +80,8 @@ describe('HTTP routes', () => {
         '/webhook/duotalk': {
           post: {
             responses: {
-              202: { description: 'Lead aceito para processamento' },
+              200: { description: 'Processamento concluído com sucesso' },
+              202: { description: 'Job aceito ou já existente e ainda em processamento' },
               400: { description: 'Payload ou requisição inválida' },
               401: { description: 'Token de acesso ausente ou inválido' },
             },
@@ -157,7 +158,7 @@ describe('HTTP routes', () => {
       payload,
     });
 
-    expect(duplicate.statusCode).toBe(200);
+    expect(duplicate.statusCode).toBe(202);
     expect(duplicate.json()).toMatchObject({ duplicate: true, status: 'pending' });
   });
 
@@ -270,7 +271,7 @@ describe('HTTP routes', () => {
       });
 
     const responses = await Promise.all([request(), request()]);
-    expect(responses.map((response) => response.statusCode).sort()).toEqual([200, 202]);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([202, 202]);
     expect(new Set(responses.map((response) => response.json().jobId)).size).toBe(1);
   });
 
@@ -289,6 +290,43 @@ describe('HTTP routes', () => {
     expect(response.json()).toEqual({
       success: false,
       message: 'Fila temporariamente sem capacidade; tente novamente mais tarde',
+    });
+  });
+
+  it('responde 200 somente quando o job duplicado já foi concluído', async () => {
+    const authorization = 'Bearer route-test-token';
+    const existing = await app.inject({
+      method: 'POST',
+      url: '/webhook/duotalk',
+      headers: { authorization },
+      payload,
+    });
+    const { queueInstance } = await import('../../src/queue/queue-manager.js');
+    const job = await queueInstance.getJob(existing.json().jobId);
+    if (!job) throw new Error('Job usado no teste não foi localizado');
+    job.status = 'completed';
+    job.result = {
+      clientCreated: false,
+      clientId: 10,
+      companyId: 25,
+      dryRun: true,
+      eventId: null,
+    };
+    job.updatedAt = new Date().toISOString();
+
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/webhook/duotalk',
+      headers: { authorization },
+      payload,
+    });
+
+    expect(duplicate.statusCode).toBe(200);
+    expect(duplicate.json()).toMatchObject({
+      success: true,
+      duplicate: true,
+      status: 'completed',
+      result: { companyId: 25 },
     });
   });
 

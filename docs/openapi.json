@@ -99,11 +99,11 @@
         "security": [{ "consumerToken": [] }],
         "responses": {
           "200": {
-            "description": "Requisição duplicada localizada ou job concluído no modo síncrono",
+            "description": "Processamento concluído com sucesso",
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Requisição duplicada localizada ou job concluído no modo síncrono",
+                  "description": "Processamento concluído com sucesso",
                   "type": "object",
                   "required": ["success", "message", "jobId", "status"],
                   "properties": {
@@ -142,11 +142,11 @@
             }
           },
           "202": {
-            "description": "Lead aceito para processamento",
+            "description": "Job aceito ou já existente e ainda em processamento",
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Lead aceito para processamento",
+                  "description": "Job aceito ou já existente e ainda em processamento",
                   "type": "object",
                   "required": ["success", "message", "jobId", "status"],
                   "properties": {

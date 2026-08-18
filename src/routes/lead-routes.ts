@@ -152,11 +152,11 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
         },
       },
       response: {
-        200: describedResponse(
-          'Requisição duplicada localizada ou job concluído no modo síncrono',
+        200: describedResponse('Processamento concluído com sucesso', jobAcceptanceResponseSchema),
+        202: describedResponse(
+          'Job aceito ou já existente e ainda em processamento',
           jobAcceptanceResponseSchema,
         ),
-        202: describedResponse('Lead aceito para processamento', jobAcceptanceResponseSchema),
         400: describedResponse('Payload ou requisição inválida', requestErrorResponseSchema),
         401: describedResponse('Token de acesso ausente ou inválido', basicErrorResponseSchema),
         409: describedResponse(

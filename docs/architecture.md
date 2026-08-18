@@ -41,7 +41,7 @@ Este documento descreve a arquitetura interna do sistema de integração entre D
   - Isola a chave por origem, `companyId` e modo `dry-run`/gravação usando um hash; a URL não é persistida em texto claro na chave.
   - Dentro do tenant, identifica duplicatas por domínios separados de `idConversa`, `id` do lead ou número de telefone. Um HMAC com a chave do deploy impede que esses identificadores sejam persistidos em texto claro ou enumerados diretamente a partir da chave.
   - `idConversa` ou `id` permanecem deduplicados durante `JOB_RETENTION_DAYS`; o fallback por telefone usa `DEDUP_WINDOW_MINUTES`.
-  - Retorna `HTTP 200 OK` com `duplicate: true` e reutiliza o `jobId` existente sem processar o lead novamente.
+  - Uma duplicata concluída retorna `200`; se ainda estiver pendente ou em processamento, retorna `202`. Ambos reutilizam o `jobId` existente sem processar o lead novamente.
   - Jobs falhos por unidade ou de/para podem ser reenviados depois da correção; outras falhas duplicadas retornam `409`.
   - Não existe bypass público da deduplicação.
   - `QUEUE_MAX_JOBS` limita crescimento de memória/disco. Jobs terminais mais antigos podem sair antes da retenção temporal para abrir espaço; se não houver job terminal removível, a API aplica backpressure com `503`.

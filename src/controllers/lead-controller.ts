@@ -111,14 +111,22 @@ export async function handleDuotalkWebhook(
   const job = enqueueResult.job;
   if (enqueueResult.duplicate) {
     logger.warn({ jobId: job.id, status: job.status }, 'Requisição duplicada detectada e ignorada');
-    const duplicateStatusCode = job.status === 'failed' ? 409 : 200;
+    const duplicateStatusCode =
+      job.status === 'failed' ? 409 : job.status === 'completed' ? 200 : 202;
+    const duplicateMessage =
+      job.status === 'completed'
+        ? 'Requisição já processada anteriormente'
+        : job.status === 'failed'
+          ? 'Requisição duplicada com falha que exige conciliação'
+          : 'Requisição já aceita e ainda em processamento';
     return reply.status(duplicateStatusCode).send({
       success: job.status !== 'failed',
-      message: 'Requisição duplicada detectada',
+      message: duplicateMessage,
       jobId: job.id,
       status: job.status,
       duplicate: true,
       errorCode: job.errorCode,
+      result: job.result,
     });
   }
 
