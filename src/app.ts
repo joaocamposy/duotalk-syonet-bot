@@ -70,6 +70,17 @@ export function buildApp(options: BuildAppOptions = {}) {
         description: 'API Webhook de integração do Duotalk ao Syonet CRM via HTTP',
         version: '1.0.0',
       },
+      servers: [
+        {
+          url: '{baseUrl}',
+          variables: {
+            baseUrl: {
+              default: 'http://localhost:3000',
+              description: 'Endereço base do microsserviço',
+            },
+          },
+        },
+      ],
       components: {
         securitySchemes: {
           consumerToken: {

@@ -65,6 +65,31 @@ describe('HTTP routes', () => {
     await appWithoutDocs.close();
   });
 
+  it('publica baseUrl configurável e descrições específicas para cada resposta', () => {
+    const specification = app.swagger();
+
+    expect(JSON.stringify(specification)).not.toContain('Default Response');
+    expect(specification).toMatchObject({
+      servers: [
+        {
+          url: '{baseUrl}',
+          variables: { baseUrl: { default: 'http://localhost:3000' } },
+        },
+      ],
+      paths: {
+        '/webhook/duotalk': {
+          post: {
+            responses: {
+              202: { description: 'Lead aceito para processamento' },
+              400: { description: 'Payload ou requisição inválida' },
+              401: { description: 'Token de acesso ausente ou inválido' },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('responde 400 para payload inválido sem devolver a senha', async () => {
     const invalidPayload = {
       credentials: { ...payload.credentials, password: 'senha-que-nao-pode-voltar' },

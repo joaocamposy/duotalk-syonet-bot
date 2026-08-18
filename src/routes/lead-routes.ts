@@ -63,6 +63,10 @@ const jobAcceptanceResponseSchema = {
   },
 };
 
+function describedResponse(description: string, schema: Record<string, unknown>) {
+  return { description, ...schema };
+}
+
 async function requireConsumerAuthorization(
   request: FastifyRequest,
   reply: FastifyReply,
@@ -148,15 +152,27 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
         },
       },
       response: {
-        200: jobAcceptanceResponseSchema,
-        202: jobAcceptanceResponseSchema,
-        400: requestErrorResponseSchema,
-        401: basicErrorResponseSchema,
-        409: jobAcceptanceResponseSchema,
-        422: requestErrorResponseSchema,
-        429: basicErrorResponseSchema,
-        500: requestErrorResponseSchema,
-        503: basicErrorResponseSchema,
+        200: describedResponse(
+          'Requisição duplicada localizada ou job concluído no modo síncrono',
+          jobAcceptanceResponseSchema,
+        ),
+        202: describedResponse('Lead aceito para processamento', jobAcceptanceResponseSchema),
+        400: describedResponse('Payload ou requisição inválida', requestErrorResponseSchema),
+        401: describedResponse('Token de acesso ausente ou inválido', basicErrorResponseSchema),
+        409: describedResponse(
+          'Job duplicado com falha que exige conciliação',
+          jobAcceptanceResponseSchema,
+        ),
+        422: describedResponse('Unidade ou mapeamento incompatível', requestErrorResponseSchema),
+        429: describedResponse('Limite de requisições excedido', basicErrorResponseSchema),
+        500: describedResponse(
+          'Erro interno ao processar a requisição',
+          requestErrorResponseSchema,
+        ),
+        503: describedResponse(
+          'Fila ou processamento temporariamente indisponível',
+          basicErrorResponseSchema,
+        ),
       },
     },
     preHandler: requireConsumerAuthorization,
@@ -169,6 +185,17 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
     schema: {
       description: 'Healthcheck básico da aplicação',
       tags: ['Status'],
+      response: {
+        200: describedResponse('Serviço operacional', {
+          type: 'object',
+          required: ['status', 'timestamp', 'uptime'],
+          properties: {
+            status: { type: 'string' },
+            timestamp: { type: 'string', format: 'date-time' },
+            uptime: { type: 'number' },
+          },
+        }),
+      },
     },
     handler: async (_req, reply) => {
       return reply.send({
@@ -186,7 +213,7 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
       tags: ['Fila'],
       security: [{ consumerToken: [] }],
       response: {
-        200: {
+        200: describedResponse('Estatísticas da fila obtidas com sucesso', {
           type: 'object',
           required: ['success', 'stats'],
           properties: {
@@ -203,9 +230,9 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
               },
             },
           },
-        },
-        401: basicErrorResponseSchema,
-        429: basicErrorResponseSchema,
+        }),
+        401: describedResponse('Token de acesso ausente ou inválido', basicErrorResponseSchema),
+        429: describedResponse('Limite de requisições excedido', basicErrorResponseSchema),
       },
     },
     preHandler: requireConsumerAuthorization,
@@ -225,7 +252,7 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
         },
       },
       response: {
-        200: {
+        200: describedResponse('Status do job obtido com sucesso', {
           type: 'object',
           required: ['success', 'job'],
           properties: {
@@ -249,10 +276,10 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
               },
             },
           },
-        },
-        401: basicErrorResponseSchema,
-        429: basicErrorResponseSchema,
-        404: basicErrorResponseSchema,
+        }),
+        401: describedResponse('Token de acesso ausente ou inválido', basicErrorResponseSchema),
+        429: describedResponse('Limite de requisições excedido', basicErrorResponseSchema),
+        404: describedResponse('Job não encontrado', basicErrorResponseSchema),
       },
     },
     preHandler: requireConsumerAuthorization,
