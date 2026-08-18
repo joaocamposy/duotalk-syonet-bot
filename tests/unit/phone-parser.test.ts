@@ -34,4 +34,9 @@ describe('phoneParser Utility', () => {
   it('deve lançar erro se o telefone for nulo ou vazio', () => {
     expect(() => parsePhoneNumber('')).toThrow('Telefone não fornecido');
   });
+
+  it('deve recusar quantidade de dígitos ou DDD inválidos', () => {
+    expect(() => parsePhoneNumber('12345678')).toThrow('DDD e 8 ou 9 dígitos');
+    expect(() => parsePhoneNumber('00123456789')).toThrow('DDD ou número');
+  });
 });

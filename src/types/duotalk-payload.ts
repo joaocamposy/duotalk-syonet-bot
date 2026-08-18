@@ -1,47 +1,55 @@
 import { z } from 'zod';
+import { syonetCredentialsSchema } from '../credentials/credential-envelope.js';
+import { parsePhoneNumber } from '../utils/phone-parser.js';
+import { syonetTargetSchema } from './syonet-target.js';
+import { sanitizeSensitiveText } from '../utils/sensitive-text.js';
+
+const optionalText = (maxLength: number) => z.string().trim().max(maxLength).optional();
+const optionalSafeText = (maxLength: number, retainedLength = maxLength) =>
+  z
+    .string()
+    .trim()
+    .max(maxLength)
+    .transform((value) => sanitizeSensitiveText(value).slice(0, retainedLength))
+    .optional();
 
 export const duotalkLeadDataSchema = z.object({
-  id: z.string().optional(),
-  idConversa: z.string().optional(),
-  origem: z.string().default('Outbound'),
-  canal: z.string().default('WhatsApp 360'),
-  qualificacaoLead: z.string().default('Lead'),
-  intermediario: z.string().default('Duotalk'),
-  nomeChatbot: z.string().optional(),
-  tipoIntegracao: z.string().optional(),
-  triggerType: z.number().optional(),
-  operador: z.string().optional(),
-  operadorId: z.string().optional(),
-  operadorEmail: z.string().optional(),
-  nome: z.string().min(1, 'Nome é obrigatório'),
-  telefone: z.string().min(8, 'Telefone é obrigatório'),
-  email: z.string().optional(),
-  mensagem: z.string().optional(),
-  messageHistory: z.string().optional(),
-  integrationIdValue: z.string().nullable().optional(),
-  integrationEmailValue: z.string().nullable().optional(),
-  url_duotalk: z.string().optional(),
-  intencao: z.string().optional(),
-  cpf: z.string().min(1, 'CPF é obrigatório para cadastro no Syonet'),
-  estado: z.string().min(1, 'Estado (UF) é obrigatório para cadastro no Syonet'),
-  cidade: z.string().min(1, 'Cidade é obrigatória para cadastro no Syonet'),
-  cep: z.string().optional(),
+  id: optionalText(200),
+  idConversa: optionalText(200),
+  origem: z.string().trim().min(1).max(100).default('Outbound'),
+  canal: z.string().trim().min(1).max(100).default('WhatsApp 360'),
+  qualificacaoLead: z.string().trim().min(1).max(100).default('Lead'),
+  intermediario: z.string().trim().min(1).max(100).default('Duotalk'),
+  operador: optionalText(150),
+  nome: z.string().trim().min(1, 'Nome é obrigatório').max(150),
+  telefone: z
+    .string()
+    .max(30)
+    .refine((value) => {
+      try {
+        parsePhoneNumber(value);
+        return true;
+      } catch {
+        return false;
+      }
+    }, 'Telefone brasileiro inválido'),
+  email: z.string().trim().email().max(254).optional(),
+  mensagem: optionalSafeText(10_000),
+  firstMessage: optionalSafeText(10_000),
+  messageHistory: optionalSafeText(50_000, 8_000),
+  url_duotalk: optionalSafeText(2_048),
+  intencao: optionalText(200),
 
-  // Modo de simulação/demonstração e bypass de desduplicação
+  // Modo de simulação/demonstração
   dryRun: z.boolean().optional(),
-  headless: z.boolean().optional(),
-  skipDedup: z.boolean().optional(),
-
-  // Suporte a credenciais dinâmicas por tenant/requisição
-  syonetUrl: z.string().optional(),
-  syonetUser: z.string().optional(),
-  syonetPass: z.string().optional(),
 });
 
 export const duotalkWebhookSchema = z.object({
-  method: z.string().optional(),
-  url: z.string().optional(),
+  method: optionalText(20),
+  url: optionalText(2_048),
   headers: z.record(z.string()).optional(),
+  credentials: syonetCredentialsSchema,
+  target: syonetTargetSchema,
   data: duotalkLeadDataSchema,
 });
 

@@ -1,28 +1,31 @@
 {
   "name": "duotalk-syonet-bot",
   "version": "1.0.0",
-  "description": "API Webhook para integrar Duotalk ao Syonet CRM via crawler Playwright com suporte a filas resilientes",
+  "description": "API webhook para integrar Duotalk ao Syonet CRM via HTTP com suporte a filas resilientes",
   "main": "dist/server.js",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:lead": "tsx scripts/test-lead.ts",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\"",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.{json,md,yml,yaml}\" \"docs/**/*.{json,md,yml,yaml}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.{json,md,yml,yaml}\" \"docs/**/*.{json,md,yml,yaml}\"",
     "openapi": "tsx scripts/generate-openapi.ts"
   },
   "keywords": [
     "duotalk",
     "syonet",
     "crm",
-    "crawler",
-    "playwright",
+    "integration",
     "fastify",
     "typescript",
     "zod"
@@ -30,27 +33,25 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@fastify/cors": "^10.1.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/swagger": "^9.8.1",
-    "@fastify/swagger-ui": "^5.2.6",
+    "@fastify/swagger-ui": "^6.1.1",
     "dotenv": "^16.4.5",
     "fastify": "^5.11.3",
     "pino": "^9.2.0",
-    "playwright": "^1.50.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/node": "^20.14.9",
     "@typescript-eslint/eslint-plugin": "^7.15.0",
     "@typescript-eslint/parser": "^7.15.0",
+    "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.1.3",
-    "pino-pretty": "^11.2.1",
     "prettier": "^3.3.2",
     "tsx": "^4.16.0",
     "typescript": "^5.5.2",
-    "vitest": "^1.6.0"
+    "vitest": "^4.1.10"
   }
 }

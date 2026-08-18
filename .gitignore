@@ -1,9 +1,12 @@
 node_modules/
 dist/
+coverage/
 logs/
 data/
 *.log
 .env
-.env.local
+.env.*
+!.env.example
+*.local.json
 .DS_Store
 storage_state.json

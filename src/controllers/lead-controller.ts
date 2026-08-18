@@ -1,114 +1,147 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import {
-  duotalkWebhookSchema,
-  duotalkLeadDataSchema,
-  DuotalkLeadData,
-} from '../types/duotalk-payload.js';
+import { createHash, createHmac } from 'node:crypto';
+import { duotalkWebhookSchema } from '../types/duotalk-payload.js';
 import { queueInstance } from '../queue/queue-manager.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
+import { encryptCredentials } from '../credentials/credential-envelope.js';
+import type { EncryptedCredentialEnvelope } from '../credentials/credential-envelope.js';
+import type { LeadJob } from '../queue/types.js';
+import type { DuotalkLeadData } from '../types/duotalk-payload.js';
+import type { SyonetTarget } from '../types/syonet-target.js';
+import { isSyonetConfigurationErrorCode } from '../queue/job-errors.js';
+
+let enqueueLock = Promise.resolve();
+
+export function buildDedupKey(
+  leadData: DuotalkLeadData,
+  syonetUrl: string,
+  target: SyonetTarget,
+): string {
+  const tenantScope = createHash('sha256')
+    .update(`${new URL(syonetUrl).origin}:${target.companyId}`)
+    .digest('hex');
+  const leadScope = leadData.idConversa
+    ? `conv_${leadData.idConversa}`
+    : leadData.id
+      ? `lead_${leadData.id}`
+      : `phone_${leadData.telefone.replace(/\D/g, '')}`;
+  const dedupHmacKey = createHmac('sha256', Buffer.from(env.CREDENTIAL_ENCRYPTION_KEY, 'base64'))
+    .update('duotalk-syonet-bot:dedup:v1')
+    .digest();
+  const leadFingerprint = createHmac('sha256', dedupHmacKey).update(leadScope).digest('hex');
+  const executionMode = leadData.dryRun ? 'dry-run' : 'write';
+  return `${tenantScope}:${executionMode}:${leadFingerprint}`;
+}
+
+async function enqueueDeduplicated(
+  leadData: DuotalkLeadData,
+  credentialEnvelope: EncryptedCredentialEnvelope,
+  target: SyonetTarget,
+  dedupKey: string,
+  dedupWindowMinutes: number,
+): Promise<{ duplicate: boolean; job: LeadJob }> {
+  const previousLock = enqueueLock;
+  let releaseLock = (): void => undefined;
+  enqueueLock = new Promise<void>((resolve) => {
+    releaseLock = resolve;
+  });
+  await previousLock;
+
+  try {
+    const duplicate = await queueInstance.findDuplicate(dedupKey, dedupWindowMinutes);
+    if (duplicate) return { duplicate: true, job: duplicate };
+    const job = await queueInstance.enqueue(leadData, credentialEnvelope, target, dedupKey);
+    return { duplicate: false, job };
+  } finally {
+    releaseLock();
+  }
+}
+
+function toPublicJob(job: Awaited<ReturnType<typeof queueInstance.getJob>>) {
+  if (!job) return null;
+  return {
+    id: job.id,
+    status: job.status,
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
+    errorCode: job.errorCode,
+    result: job.result,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  };
+}
 
 export async function handleDuotalkWebhook(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const body = request.body as Record<string, unknown>;
+  const parsedWebhook = duotalkWebhookSchema.parse(request.body);
+  const leadData = parsedWebhook.data;
+  const credentialEnvelope = encryptCredentials(parsedWebhook.credentials);
 
-  let leadData: DuotalkLeadData;
+  logger.info('Recebido webhook de criação de lead do Duotalk');
 
-  // Aceita tanto payload envelopado { data: {...} } quanto direto {...}
-  if (body && typeof body === 'object' && 'data' in body) {
-    const parsedWebhook = duotalkWebhookSchema.parse(body);
-    leadData = parsedWebhook.data;
-  } else {
-    leadData = duotalkLeadDataSchema.parse(body);
+  const query = request.query as { sync?: string };
+
+  // A desduplicação é isolada por origem e unidade sem persistir a URL em texto claro.
+  const dedupKey = buildDedupKey(leadData, parsedWebhook.credentials.url, parsedWebhook.target);
+  const dedupWindowMinutes =
+    leadData.idConversa || leadData.id
+      ? env.JOB_RETENTION_DAYS * 24 * 60
+      : env.DEDUP_WINDOW_MINUTES;
+
+  const isSyncRequested = query?.sync === 'true';
+
+  if (isSyncRequested && !queueInstance.hasWorker()) {
+    logger.error('Requisição rejeitada: nenhum worker ativo registrado na aplicação.');
+    return reply.status(503).send({
+      success: false,
+      message: 'Processamento indisponível: nenhum worker ativo registrado',
+    });
   }
 
-  // Extração de credenciais dinâmicas do Syonet via Headers HTTP (se fornecidos)
-  const headerUser = (request.headers['x-syonet-user'] || request.headers['syonet-user']) as string;
-  const headerPass = (request.headers['x-syonet-pass'] || request.headers['syonet-pass']) as string;
-  const headerUrl = (request.headers['x-syonet-url'] || request.headers['syonet-url']) as string;
-
-  // Se houver header Authorization Bearer com Base64 (user:pass)
-  const authHeader = request.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    try {
-      const decoded = Buffer.from(token, 'base64').toString('utf-8');
-      const [u, p] = decoded.split(':');
-      if (u && p) {
-        leadData.syonetUser = leadData.syonetUser || u;
-        leadData.syonetPass = leadData.syonetPass || p;
-      }
-    } catch {
-      logger.warn('Token Bearer fornecido não pôde ser decodificado como base64(user:pass)');
-    }
-  }
-
-  if (headerUser) leadData.syonetUser = headerUser;
-  if (headerPass) leadData.syonetPass = headerPass;
-  if (headerUrl) leadData.syonetUrl = headerUrl;
-
-  logger.info(
-    {
-      leadName: leadData.nome,
-      phone: leadData.telefone,
-      syonetUser: leadData.syonetUser || 'default-env',
-    },
-    'Recebido webhook de criação de lead do Duotalk',
+  const enqueueResult = await enqueueDeduplicated(
+    leadData,
+    credentialEnvelope,
+    parsedWebhook.target,
+    dedupKey,
+    dedupWindowMinutes,
   );
-
-  const query = request.query as { sync?: string; skipDedup?: string };
-  const isSkipDedupRequested =
-    query?.skipDedup === 'true' ||
-    request.headers['x-skip-dedup'] === 'true' ||
-    leadData.skipDedup === true;
-
-  // Chave de desduplicação: usa idConversa / id ou telefone sanitizado
-  const dedupKey =
-    leadData.idConversa || leadData.id || `phone_${leadData.telefone.replace(/\D/g, '')}`;
-
-  // Verifica se existe um job idêntico recente (se o bypass não for solicitado)
-  if (!isSkipDedupRequested) {
-    const duplicateJob = await queueInstance.findDuplicate(dedupKey, env.DEDUP_WINDOW_MINUTES);
-
-    if (duplicateJob) {
-      logger.warn(
-        { jobId: duplicateJob.id, dedupKey, status: duplicateJob.status },
-        'Requisição duplicada detectada e ignorada',
-      );
-      return reply.status(200).send({
-        success: true,
-        message: 'Requisição duplicada ignorada (Job idêntico recente já registrado)',
-        jobId: duplicateJob.id,
-        status: duplicateJob.status,
-        duplicate: true,
-      });
-    }
+  const job = enqueueResult.job;
+  if (enqueueResult.duplicate) {
+    logger.warn({ jobId: job.id, status: job.status }, 'Requisição duplicada detectada e ignorada');
+    const duplicateStatusCode = job.status === 'failed' ? 409 : 200;
+    return reply.status(duplicateStatusCode).send({
+      success: job.status !== 'failed',
+      message: 'Requisição duplicada detectada',
+      jobId: job.id,
+      status: job.status,
+      duplicate: true,
+      errorCode: job.errorCode,
+    });
   }
-
-  const isSyncRequested =
-    query?.sync === 'true' ||
-    request.headers['x-sync'] === 'true' ||
-    request.headers['sync'] === 'true';
 
   if (isSyncRequested) {
-    if (!queueInstance.hasWorker()) {
-      logger.error('Requisição rejeitada: nenhum worker ativo registrado na aplicação.');
-      return reply.status(503).send({
-        success: false,
-        message:
-          'Processamento indisponível: nenhum worker ativo registrado para executar a automação',
-      });
-    }
-
-    const job = await queueInstance.enqueue(leadData, dedupKey);
-
     // Aguarda a conclusão do job para responder de forma síncrona
     let updatedJob = await queueInstance.getJob(job.id);
-    while (updatedJob && (updatedJob.status === 'pending' || updatedJob.status === 'processing')) {
+    const deadline = Date.now() + env.SYNC_TIMEOUT_MS;
+    while (
+      updatedJob &&
+      (updatedJob.status === 'pending' || updatedJob.status === 'processing') &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 500));
       updatedJob = await queueInstance.getJob(job.id);
+    }
+
+    if (updatedJob?.status === 'pending' || updatedJob?.status === 'processing') {
+      return reply.status(202).send({
+        success: true,
+        message: 'Tempo síncrono esgotado; o job continuará em processamento assíncrono',
+        jobId: job.id,
+        status: updatedJob.status,
+      });
     }
 
     if (updatedJob?.status === 'completed') {
@@ -117,19 +150,19 @@ export async function handleDuotalkWebhook(
         message: 'Lead processado e gravado no Syonet CRM com sucesso (Modo Síncrono)',
         jobId: job.id,
         status: updatedJob.status,
+        result: updatedJob.result,
       });
     }
 
-    return reply.status(500).send({
+    const statusCode = isSyonetConfigurationErrorCode(updatedJob?.errorCode) ? 422 : 500;
+    return reply.status(statusCode).send({
       success: false,
       message: 'Falha no processamento síncrono do lead',
       jobId: job.id,
       status: updatedJob?.status || 'failed',
-      error: updatedJob?.error,
+      errorCode: updatedJob?.errorCode,
     });
   }
-
-  const job = await queueInstance.enqueue(leadData, dedupKey);
 
   return reply.status(202).send({
     success: true,
@@ -155,5 +188,5 @@ export async function getJobDetails(
     return reply.status(404).send({ success: false, message: 'Job não encontrado' });
   }
 
-  return reply.send({ success: true, job });
+  return reply.send({ success: true, job: toPublicJob(job) });
 }

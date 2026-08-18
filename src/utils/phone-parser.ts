@@ -20,11 +20,17 @@ export function parsePhoneNumber(phone: string): ParsedPhone {
   // Remove caracteres não numéricos
   const digitsOnly = phone.replace(/\D/g, '');
 
+  const hasBrazilianDdi =
+    digitsOnly.startsWith('55') && (digitsOnly.length === 12 || digitsOnly.length === 13);
+  if (!hasBrazilianDdi && digitsOnly.length !== 10 && digitsOnly.length !== 11) {
+    throw new Error('Telefone brasileiro deve conter DDD e 8 ou 9 dígitos');
+  }
+
   let ddi = '55';
   let remaining = digitsOnly;
 
   // Se o número começa com 55 e possui 12 ou 13 dígitos no total
-  if (digitsOnly.startsWith('55') && (digitsOnly.length === 12 || digitsOnly.length === 13)) {
+  if (hasBrazilianDdi) {
     ddi = '55';
     remaining = digitsOnly.substring(2);
   }
@@ -32,6 +38,9 @@ export function parsePhoneNumber(phone: string): ParsedPhone {
   // DDD possui os primeiros 2 dígitos
   const ddd = remaining.substring(0, 2);
   const number = remaining.substring(2);
+  if (!/^[1-9]\d$/.test(ddd) || !/^\d{8,9}$/.test(number)) {
+    throw new Error('DDD ou número de telefone inválido');
+  }
 
   // Formatação com hífen se o número tiver 8 ou 9 dígitos
   let formattedWithHyphen = number;

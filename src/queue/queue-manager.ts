@@ -10,16 +10,20 @@ export function createQueueDriver(): QueueDriver {
 
   switch (driverType) {
     case 'memory':
-      return new MemoryQueueDriver(env.QUEUE_CONCURRENCY);
-    case 'file':
-      return new FileQueueDriver(env.QUEUE_FILE_PATH, env.QUEUE_CONCURRENCY);
-    case 'redis':
-      logger.warn(
-        'Driver Redis selecionado. Fallback temporário para FileQueueDriver até liberação da v2',
+      return new MemoryQueueDriver(
+        env.QUEUE_CONCURRENCY,
+        env.QUEUE_RETRY_BASE_DELAY_MS,
+        env.JOB_RETENTION_DAYS,
+        env.QUEUE_MAX_JOBS,
       );
-      return new FileQueueDriver(env.QUEUE_FILE_PATH, env.QUEUE_CONCURRENCY);
-    default:
-      return new FileQueueDriver(env.QUEUE_FILE_PATH, env.QUEUE_CONCURRENCY);
+    case 'file':
+      return new FileQueueDriver(
+        env.QUEUE_FILE_PATH,
+        env.QUEUE_CONCURRENCY,
+        env.QUEUE_RETRY_BASE_DELAY_MS,
+        env.JOB_RETENTION_DAYS,
+        env.QUEUE_MAX_JOBS,
+      );
   }
 }
 

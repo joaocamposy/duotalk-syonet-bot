@@ -1,10 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { buildApp } from '../src/app.js';
+import { format, resolveConfig } from 'prettier';
 
 async function generateOpenApiSpec() {
   console.log('🚀 Gerando especificação OpenAPI (JSON e YAML)...');
-  const app = buildApp();
+  process.env.NODE_ENV = 'test';
+  process.env.QUEUE_DRIVER = 'memory';
+  process.env.SYONET_ALLOWED_HOSTS = 'crm.example.com';
+  const { buildApp } = await import('../src/app.js');
+  const app = buildApp({ startWorker: false });
   await app.ready();
 
   const openApiObject = app.swagger();
@@ -15,7 +19,12 @@ async function generateOpenApiSpec() {
   }
 
   const jsonPath = path.join(docsDir, 'openapi.json');
-  fs.writeFileSync(jsonPath, JSON.stringify(openApiObject, null, 2), 'utf-8');
+  const prettierConfig = await resolveConfig(jsonPath);
+  const formattedJson = await format(JSON.stringify(openApiObject), {
+    ...prettierConfig,
+    parser: 'json',
+  });
+  fs.writeFileSync(jsonPath, formattedJson, 'utf-8');
   console.log(`✅ Arquivo OpenAPI JSON salvo em: ${jsonPath}`);
 
   await app.close();

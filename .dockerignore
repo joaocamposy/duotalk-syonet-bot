@@ -4,5 +4,9 @@ logs
 data
 coverage
 .git
-.env
+.env*
+!.env.example
+*.local.json
+*.log
+.DS_Store
 storage_state.json

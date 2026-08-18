@@ -1,14 +1,19 @@
 import { buildApp } from './app.js';
 import { env } from './config/env.js';
 import { logger } from './utils/logger.js';
+import { queueInstance } from './queue/queue-manager.js';
+import { closeGracefully } from './shutdown/graceful-shutdown.js';
 
 const app = buildApp();
+let isShuttingDown = false;
 
 async function start() {
   try {
-    await app.listen({ port: env.PORT, host: env.HOST });
-    logger.info(`🚀 Servidor rodando em http://${env.HOST}:${env.PORT}`);
-    logger.info(`📚 Documentação Swagger disponível em http://${env.HOST}:${env.PORT}/docs`);
+    const address = await app.listen({ port: env.PORT, host: env.HOST });
+    logger.info({ address }, 'Servidor iniciado');
+    if (env.NODE_ENV !== 'production') {
+      logger.info({ documentationUrl: `${address}/docs` }, 'Documentação Swagger disponível');
+    }
     logger.info(`⚙️  Driver de fila ativo: [${env.QUEUE_DRIVER}]`);
   } catch (err) {
     logger.fatal({ err }, 'Erro ao iniciar servidor Fastify');
@@ -18,10 +23,26 @@ async function start() {
 
 // Graceful Shutdown
 const handleShutdown = async (signal: string) => {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
   logger.info({ signal }, 'Recebido sinal de encerramento, desligando graciosamente...');
   try {
-    await app.close();
-    logger.info('Servidor HTTP encerrado com sucesso');
+    const { activeJobsDrained, stats } = await closeGracefully(
+      app,
+      queueInstance,
+      env.SHUTDOWN_TIMEOUT_MS,
+    );
+    if (activeJobsDrained) logger.info('Servidor HTTP encerrado após concluir os jobs ativos');
+    else logger.warn('Timeout ao aguardar a conclusão dos jobs durante o shutdown');
+    if (stats.pending > 0) {
+      const message =
+        stats.driver === 'file'
+          ? 'Jobs pendentes permaneceram persistidos para o próximo start'
+          : 'Jobs pendentes da fila em memória serão perdidos no encerramento';
+      logger.warn({ pending: stats.pending, driver: stats.driver }, message);
+    }
+    logger.flush();
     process.exit(0);
   } catch (err) {
     logger.error({ err }, 'Erro durante o graceful shutdown');
