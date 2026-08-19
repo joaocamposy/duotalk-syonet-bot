@@ -5,11 +5,11 @@ import { ZodError } from 'zod';
 import rateLimit from '@fastify/rate-limit';
 import { leadRoutes } from './routes/lead-routes.js';
 import { queueInstance } from './queue/queue-manager.js';
-import { processLeadJob } from './crawler/syonet-crawler.js';
+import { processLeadJob } from './integrations/syonet/lead-processor.js';
 import { logger } from './utils/logger.js';
 import { env } from './config/env.js';
 import { QueueCapacityError } from './queue/job-errors.js';
-import { isAuthorizedConsumer } from './auth/microservice-auth.js';
+import { isAuthorizedConsumer } from './auth/api-auth.js';
 
 interface BuildAppOptions {
   exposeDocumentation?: boolean;
@@ -67,7 +67,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     openapi: {
       info: {
         title: 'Duotalk Syonet Bot API',
-        description: 'API Webhook de integração do Duotalk ao Syonet CRM via HTTP',
+        description: 'API de integração de leads do Duotalk com o Syonet CRM via HTTP',
         version: '1.0.0',
       },
       servers: [
@@ -161,7 +161,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   });
 
   // Conectar o worker da fila à integração HTTP do Syonet
-  if (options.startWorker !== false) {
+  if (env.QUEUE_ENABLED && options.startWorker !== false) {
     queueInstance.process(async (job) => processLeadJob(job));
   }
 

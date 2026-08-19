@@ -4,7 +4,7 @@ import {
   decryptCredentials,
   encryptCredentials,
   syonetCredentialsSchema,
-} from '../../src/credentials/credential-envelope.js';
+} from '../../src/integrations/syonet/credentials.js';
 
 const encryptionKey = randomBytes(32).toString('base64');
 

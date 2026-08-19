@@ -1,14 +1,14 @@
-import { SyonetCredentials, syonetCredentialsSchema } from '../credentials/credential-envelope.js';
-import { LeadJobResult } from '../queue/types.js';
-import { NonRetryableJobError, SYONET_COMPANY_ACCESS_DENIED } from '../queue/job-errors.js';
-import { env } from '../config/env.js';
-import { DuotalkLeadData } from '../types/duotalk-payload.js';
-import { logger } from '../utils/logger.js';
-import { parsePhoneNumber } from '../utils/phone-parser.js';
-import { loginAndGetCookiesViaHttp } from './syonet-auth-service.js';
+import { SyonetCredentials, syonetCredentialsSchema } from './credentials.js';
+import { LeadJobResult } from '../../queue/types.js';
+import { NonRetryableJobError } from '../../queue/job-errors.js';
+import { env } from '../../config/env.js';
+import { DuotalkLeadData } from '../../types/lead-request.js';
+import { logger } from '../../utils/logger.js';
+import { parsePhoneNumber } from '../../utils/phone-parser.js';
+import { loginAndGetCookiesViaHttp } from './auth-service.js';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { SyonetTarget } from '../types/syonet-target.js';
+import { SyonetTarget } from './target.js';
 import {
   selectContactForm,
   selectEventType,
@@ -16,11 +16,16 @@ import {
   SyonetContactForm,
   SyonetEventType,
   SyonetMedia,
-} from './syonet-mapping.js';
-import { sanitizeSensitiveText } from '../utils/sensitive-text.js';
+} from './mapping.js';
+import { sanitizeSensitiveText } from '../../utils/sensitive-text.js';
+import { SYONET_COMPANY_ACCESS_DENIED } from './errors.js';
+import { applySyonetTimeZone, SYONET_TIME_ZONE } from './time-zone.js';
+
+applySyonetTimeZone();
 
 export interface SyonetGateway {
   get<T>(path: string): Promise<T>;
+  patch<T>(path: string, body: unknown): Promise<T>;
   post<T>(path: string, body: unknown): Promise<T>;
 }
 
@@ -33,13 +38,17 @@ interface SyonetCompany {
 }
 
 interface SyonetClient {
+  email?: string | null;
   idCliente?: number;
   id?: number;
+  nomeCliente?: string | null;
+  telefoneCelular?: unknown;
 }
 
 interface SyonetEvent {
   idEvento?: number;
   id?: number;
+  observacao?: string | null;
 }
 
 interface SyonetEventResponse {
@@ -52,7 +61,13 @@ const numericIdSchema = z.number().int().finite();
 const syonetUserSchema: z.ZodType<SyonetUser> = z.object({ idUsuario: numericIdSchema });
 const syonetCompanySchema: z.ZodType<SyonetCompany> = z.object({ idEmpresa: numericIdSchema });
 const syonetClientSchema = z
-  .object({ idCliente: numericIdSchema.optional(), id: numericIdSchema.optional() })
+  .object({
+    email: z.string().nullable().optional(),
+    idCliente: numericIdSchema.optional(),
+    id: numericIdSchema.optional(),
+    nomeCliente: z.string().nullable().optional(),
+    telefoneCelular: z.unknown().optional(),
+  })
   .passthrough();
 const syonetClientsSchema = z.array(syonetClientSchema);
 const syonetEventResponseSchema: z.ZodType<SyonetEventResponse> = z.object({
@@ -62,6 +77,14 @@ const syonetEventResponseSchema: z.ZodType<SyonetEventResponse> = z.object({
   idEvento: numericIdSchema.optional(),
   id: numericIdSchema.optional(),
 });
+const syonetEventSchema: z.ZodType<SyonetEvent> = z
+  .object({
+    idEvento: numericIdSchema.optional(),
+    id: numericIdSchema.optional(),
+    observacao: z.string().nullable().optional(),
+  })
+  .passthrough();
+const syonetEventsSchema = z.array(syonetEventSchema);
 const syonetContactFormsSchema: z.ZodType<SyonetContactForm[]> = z.array(
   z.object({
     descricao: z.string().optional(),
@@ -92,6 +115,25 @@ const sessionCache = new Map<string, CachedSession>();
 const SESSION_CACHE_TTL_MS = 30 * 60 * 1_000;
 const SESSION_CACHE_MAX_ENTRIES = 500;
 const MAX_OBSERVATION_LENGTH = 8_000;
+const MAX_EVENT_SEARCH_RESULTS = 200;
+const conversationLocks = new Map<string, Promise<void>>();
+
+async function withConversationLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+  const previous = conversationLocks.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  conversationLocks.set(key, current);
+
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (conversationLocks.get(key) === current) conversationLocks.delete(key);
+  }
+}
 
 function getCachedSession(cacheKey: string): string | null {
   const cached = sessionCache.get(cacheKey);
@@ -219,6 +261,54 @@ function buildObservation(lead: DuotalkLeadData): string {
     : `${observation.slice(0, MAX_OBSERVATION_LENGTH - 15)}\n[TRUNCADO]`;
 }
 
+function hasConversationMarker(
+  observation: string | null | undefined,
+  idConversa: string,
+): boolean {
+  if (!observation) return false;
+  const expected = `ID conversa: ${idConversa}`;
+  return observation.split(/\r?\n/).some((line) => line.trim() === expected);
+}
+
+async function findEventByConversation(
+  api: SyonetGateway,
+  clientId: number,
+  companyId: number,
+  eventTypeId: string,
+  idConversa: string,
+): Promise<number | null> {
+  const searchParams = new URLSearchParams({
+    idCliente: String(clientId),
+    idEmpresa: String(companyId),
+    idTipoEvento: eventTypeId,
+    maxRegistros: String(MAX_EVENT_SEARCH_RESULTS),
+    ordenacao: 'DATAEVENTO',
+  });
+  const events = syonetEventsSchema.parse(
+    await api.get<unknown>(`/api/evento?${searchParams.toString()}`),
+  );
+  const matches: number[] = [];
+
+  for (const event of events) {
+    const eventId = getNumericId(event);
+    if (eventId === null) continue;
+    const eventWithObservation =
+      event.observacao === undefined
+        ? syonetEventSchema.parse(await api.get<unknown>(`/api/evento/${eventId}`))
+        : event;
+    if (hasConversationMarker(eventWithObservation.observacao, idConversa)) {
+      matches.push(eventId);
+    }
+  }
+
+  if (matches.length > 1) {
+    throw new NonRetryableJobError(
+      'Mais de uma oportunidade do Syonet possui o mesmo identificador de conversa; exige conciliação',
+    );
+  }
+  return matches[0] ?? null;
+}
+
 function getNextActionTimestamp(): number {
   const nextAction = new Date();
   nextAction.setDate(nextAction.getDate() + 1);
@@ -243,6 +333,32 @@ function buildClientPayload(lead: DuotalkLeadData, contactForm: string): Record<
     },
     validateFields: false,
   };
+}
+
+function normalizeComparableText(value: string | null | undefined): string {
+  return (value ?? '').normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR');
+}
+
+function buildClientUpdatePayload(
+  client: SyonetClient,
+  lead: DuotalkLeadData,
+): Record<string, unknown> {
+  const update: Record<string, unknown> = {};
+  if (normalizeComparableText(client.nomeCliente) !== normalizeComparableText(lead.nome)) {
+    update.nomeCliente = lead.nome;
+  }
+  if (lead.email && normalizeComparableText(client.email) !== normalizeComparableText(lead.email)) {
+    update.email = lead.email;
+  }
+
+  const phone = parsePhoneNumber(lead.telefone);
+  if (!collectClientPhones(client.telefoneCelular).has(phone.fullWithoutDdi)) {
+    update.telefoneCelular = {
+      ddd: phone.ddd,
+      numero: phone.number,
+    };
+  }
+  return update;
 }
 
 export class HttpSyonetGateway implements SyonetGateway {
@@ -282,6 +398,14 @@ export class HttpSyonetGateway implements SyonetGateway {
     });
   }
 
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>(path, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   private async authenticate(): Promise<void> {
     this.cookieHeader = await loginAndGetCookiesViaHttp(this.url, this.user, this.pass);
     cacheSession(this.cacheKey, this.cookieHeader);
@@ -306,9 +430,9 @@ export class HttpSyonetGateway implements SyonetGateway {
         },
       });
     } catch (error: unknown) {
-      if (options.method === 'POST') {
+      if (options.method === 'POST' || options.method === 'PATCH') {
         throw new NonRetryableJobError(
-          `Falha de rede após iniciar POST ${path}; resultado no Syonet é ambíguo e exige conciliação`,
+          `Falha de rede após iniciar ${options.method} ${path}; resultado no Syonet é ambíguo e exige conciliação`,
           { cause: error },
         );
       }
@@ -317,6 +441,7 @@ export class HttpSyonetGateway implements SyonetGateway {
 
     const safeAuthenticationFailure =
       options.method !== 'POST' &&
+      options.method !== 'PATCH' &&
       (response.status === 401 ||
         response.status === 403 ||
         (response.status >= 300 && response.status < 400));
@@ -329,7 +454,11 @@ export class HttpSyonetGateway implements SyonetGateway {
 
     if (!response.ok) {
       const message = `Syonet recusou ${options.method ?? 'GET'} ${path}: HTTP ${response.status}`;
-      if (options.method === 'POST' || (response.status >= 300 && response.status < 500)) {
+      if (
+        options.method === 'POST' ||
+        options.method === 'PATCH' ||
+        (response.status >= 300 && response.status < 500)
+      ) {
         throw new NonRetryableJobError(message);
       }
       throw new Error(message);
@@ -338,9 +467,9 @@ export class HttpSyonetGateway implements SyonetGateway {
     try {
       return (await response.json()) as T;
     } catch (error: unknown) {
-      if (options.method === 'POST') {
+      if (options.method === 'POST' || options.method === 'PATCH') {
         throw new NonRetryableJobError(
-          `Syonet confirmou POST ${path}, mas retornou uma resposta inválida; exige conciliação`,
+          `Syonet confirmou ${options.method} ${path}, mas retornou uma resposta inválida; exige conciliação`,
           { cause: error },
         );
       }
@@ -369,12 +498,26 @@ export async function processLeadViaApi(
     );
   }
 
+  const process = () => processLeadForCompany(lead, company, api);
+  if (!lead.idConversa) return process();
+
+  const lockKey = createHash('sha256')
+    .update(JSON.stringify([credentials.url, company.idEmpresa, lead.idConversa]))
+    .digest('hex');
+  return withConversationLock(lockKey, process);
+}
+
+async function processLeadForCompany(
+  lead: DuotalkLeadData,
+  company: SyonetCompany,
+  api: SyonetGateway,
+): Promise<LeadProcessResult> {
   const phone = parsePhoneNumber(lead.telefone);
   const searchParams = new URLSearchParams({
     incluiContatos: 'true',
     status: 'ATIVO',
     telefone: phone.fullWithoutDdi,
-    timeZoneId: 'America/Sao_Paulo',
+    timeZoneId: SYONET_TIME_ZONE,
   });
   const clients = syonetClientsSchema.parse(
     await api.get<unknown>(`/api/cliente?${searchParams.toString()}`),
@@ -386,6 +529,18 @@ export async function processLeadViaApi(
       'O Syonet retornou o cliente do telefone informado sem um identificador válido',
     );
   }
+  const detailedExistingClient =
+    existingClientId !== null
+      ? syonetClientSchema.parse(await api.get<unknown>(`/api/cliente/${existingClientId}`))
+      : null;
+  if (detailedExistingClient && getNumericId(detailedExistingClient) !== existingClientId) {
+    throw new NonRetryableJobError(
+      'O Syonet retornou um identificador divergente ao abrir o cadastro do cliente',
+    );
+  }
+  const clientUpdatePayload = detailedExistingClient
+    ? buildClientUpdatePayload(detailedExistingClient, lead)
+    : {};
 
   const user = syonetUserSchema.parse(await api.get<unknown>('/api/sessao/usuario'));
   const contactForms = syonetContactFormsSchema.parse(
@@ -420,9 +575,11 @@ export async function processLeadViaApi(
   if (lead.dryRun) {
     return {
       clientCreated: false,
+      clientUpdated: false,
       clientId: existingClientId,
       companyId: company.idEmpresa,
       dryRun: true,
+      eventCreated: false,
       eventId: null,
       mapping,
     };
@@ -430,6 +587,7 @@ export async function processLeadViaApi(
 
   let clientId = existingClientId;
   const clientCreated = !existingClient;
+  let clientUpdated = false;
 
   if (clientCreated) {
     const createdClient = parseConfirmedWrite(
@@ -445,7 +603,47 @@ export async function processLeadViaApi(
     }
     logger.info({ clientId }, 'Cliente criado via API HTTP do Syonet');
   } else {
-    logger.info({ clientId }, 'Cliente existente localizado pelo telefone no Syonet');
+    if (Object.keys(clientUpdatePayload).length > 0) {
+      const updatedClient = parseConfirmedWrite(
+        syonetClientSchema,
+        await api.patch<unknown>(`/api/cliente/${clientId}`, clientUpdatePayload),
+        'a atualização do cliente',
+      );
+      if (getNumericId(updatedClient) !== clientId) {
+        throw new NonRetryableJobError(
+          'O Syonet respondeu à atualização com idCliente divergente; exige conciliação',
+        );
+      }
+      clientUpdated = true;
+      logger.info({ clientId }, 'Cliente existente atualizado via API HTTP do Syonet');
+    } else {
+      logger.info({ clientId }, 'Cliente existente já possui os dados atuais do lead');
+    }
+  }
+
+  if (clientId === null) {
+    throw new NonRetryableJobError('Não foi possível determinar o cliente da oportunidade');
+  }
+
+  const existingEventId =
+    !clientCreated && lead.idConversa
+      ? await findEventByConversation(api, clientId, company.idEmpresa, typeId, lead.idConversa)
+      : null;
+  if (existingEventId !== null) {
+    logger.info(
+      { clientId, eventId: existingEventId },
+      'Oportunidade existente reutilizada pelo identificador da conversa',
+    );
+    return {
+      clientCreated,
+      clientUpdated,
+      clientId,
+      companyId: company.idEmpresa,
+      dryRun: false,
+      eventCreated: false,
+      eventId: existingEventId,
+      mapping,
+    };
   }
 
   let createdEvent: z.infer<typeof syonetEventResponseSchema>;
@@ -485,9 +683,11 @@ export async function processLeadViaApi(
   logger.info({ clientId, eventId }, 'Oportunidade criada via API HTTP do Syonet');
   return {
     clientCreated,
+    clientUpdated,
     clientId,
     companyId: company.idEmpresa,
     dryRun: false,
+    eventCreated: true,
     eventId,
     mapping,
   };

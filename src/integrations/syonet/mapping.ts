@@ -1,11 +1,11 @@
-import { SYONET_MAPPINGS } from '../config/syonet-mappings.js';
-import { DuotalkLeadData } from '../types/duotalk-payload.js';
+import { SYONET_MAPPINGS } from './mapping-config.js';
+import { DuotalkLeadData } from '../../types/lead-request.js';
 import {
-  NonRetryableJobError,
   SYONET_CONTACT_FORM_MAPPING_NOT_FOUND,
   SYONET_EVENT_TYPE_MAPPING_NOT_FOUND,
   SYONET_MEDIA_MAPPING_NOT_FOUND,
-} from '../queue/job-errors.js';
+} from './errors.js';
+import { NonRetryableJobError } from '../../queue/job-errors.js';
 
 export interface SyonetContactForm {
   descricao?: string;

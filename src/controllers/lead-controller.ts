@@ -1,15 +1,16 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
 import { createHash, createHmac } from 'node:crypto';
-import { duotalkWebhookSchema } from '../types/duotalk-payload.js';
+import { leadRequestSchema } from '../types/lead-request.js';
 import { queueInstance } from '../queue/queue-manager.js';
 import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
-import { encryptCredentials } from '../credentials/credential-envelope.js';
-import type { EncryptedCredentialEnvelope } from '../credentials/credential-envelope.js';
+import { encryptCredentials } from '../integrations/syonet/credentials.js';
+import type { EncryptedCredentialEnvelope } from '../integrations/syonet/credentials.js';
 import type { LeadJob } from '../queue/types.js';
-import type { DuotalkLeadData } from '../types/duotalk-payload.js';
-import type { SyonetTarget } from '../types/syonet-target.js';
-import { isSyonetConfigurationErrorCode } from '../queue/job-errors.js';
+import type { DuotalkLeadData } from '../types/lead-request.js';
+import type { SyonetTarget } from '../integrations/syonet/target.js';
+import { isSyonetConfigurationErrorCode } from '../integrations/syonet/errors.js';
+import { parsePhoneNumber } from '../utils/phone-parser.js';
 
 let enqueueLock = Promise.resolve();
 
@@ -26,10 +27,17 @@ export function buildDedupKey(
     : leadData.id
       ? `lead_${leadData.id}`
       : `phone_${leadData.telefone.replace(/\D/g, '')}`;
+  const contactState = JSON.stringify({
+    email: (leadData.email ?? '').normalize('NFKC').trim().toLocaleLowerCase('pt-BR'),
+    name: leadData.nome.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('pt-BR'),
+    phone: parsePhoneNumber(leadData.telefone).fullWithoutDdi,
+  });
   const dedupHmacKey = createHmac('sha256', Buffer.from(env.CREDENTIAL_ENCRYPTION_KEY, 'base64'))
-    .update('duotalk-syonet-bot:dedup:v1')
+    .update('duotalk-syonet-bot:dedup:v2')
     .digest();
-  const leadFingerprint = createHmac('sha256', dedupHmacKey).update(leadScope).digest('hex');
+  const leadFingerprint = createHmac('sha256', dedupHmacKey)
+    .update(`${leadScope}:${contactState}`)
+    .digest('hex');
   const executionMode = leadData.dryRun ? 'dry-run' : 'write';
   return `${tenantScope}:${executionMode}:${leadFingerprint}`;
 }
@@ -72,20 +80,35 @@ function toPublicJob(job: Awaited<ReturnType<typeof queueInstance.getJob>>) {
   };
 }
 
-export async function handleDuotalkWebhook(
+export async function handleLeadRequest(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const parsedWebhook = duotalkWebhookSchema.parse(request.body);
-  const leadData = parsedWebhook.data;
-  const credentialEnvelope = encryptCredentials(parsedWebhook.credentials);
+  const parsedRequest = leadRequestSchema.parse(request.body);
+  if (!env.QUEUE_ENABLED) {
+    logger.warn('Requisição rejeitada: fila desativada por configuração');
+    return reply.status(503).send({
+      success: false,
+      message: 'Processamento indisponível: fila desativada por configuração',
+    });
+  }
+  if (!queueInstance.hasWorker()) {
+    logger.error('Requisição rejeitada: nenhum worker ativo registrado na aplicação');
+    return reply.status(503).send({
+      success: false,
+      message: 'Processamento indisponível: nenhum worker ativo registrado',
+    });
+  }
 
-  logger.info('Recebido webhook de criação de lead do Duotalk');
+  const leadData = parsedRequest.data;
+  const credentialEnvelope = encryptCredentials(parsedRequest.credentials);
+
+  logger.info('Recebida requisição de processamento de lead');
 
   const query = request.query as { sync?: string };
 
   // A desduplicação é isolada por origem e unidade sem persistir a URL em texto claro.
-  const dedupKey = buildDedupKey(leadData, parsedWebhook.credentials.url, parsedWebhook.target);
+  const dedupKey = buildDedupKey(leadData, parsedRequest.credentials.url, parsedRequest.target);
   const dedupWindowMinutes =
     leadData.idConversa || leadData.id
       ? env.JOB_RETENTION_DAYS * 24 * 60
@@ -93,18 +116,10 @@ export async function handleDuotalkWebhook(
 
   const isSyncRequested = query?.sync === 'true';
 
-  if (isSyncRequested && !queueInstance.hasWorker()) {
-    logger.error('Requisição rejeitada: nenhum worker ativo registrado na aplicação.');
-    return reply.status(503).send({
-      success: false,
-      message: 'Processamento indisponível: nenhum worker ativo registrado',
-    });
-  }
-
   const enqueueResult = await enqueueDeduplicated(
     leadData,
     credentialEnvelope,
-    parsedWebhook.target,
+    parsedRequest.target,
     dedupKey,
     dedupWindowMinutes,
   );
@@ -144,9 +159,9 @@ export async function handleDuotalkWebhook(
     }
 
     if (updatedJob?.status === 'pending' || updatedJob?.status === 'processing') {
-      return reply.status(202).send({
-        success: true,
-        message: 'Tempo síncrono esgotado; o job continuará em processamento assíncrono',
+      return reply.status(504).send({
+        success: false,
+        message: 'Tempo síncrono esgotado; consulte o job para confirmar o resultado',
         jobId: job.id,
         status: updatedJob.status,
       });

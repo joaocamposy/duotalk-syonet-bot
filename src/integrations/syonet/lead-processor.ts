@@ -1,9 +1,10 @@
-import { decryptCredentials } from '../credentials/credential-envelope.js';
-import type { SyonetCredentials } from '../credentials/credential-envelope.js';
-import { LeadJob } from '../queue/types.js';
-import { NonRetryableJobError, SYONET_COMPANY_ACCESS_DENIED } from '../queue/job-errors.js';
-import { logger } from '../utils/logger.js';
-import { LeadProcessResult, processLeadViaApi } from './syonet-api-client.js';
+import { decryptCredentials } from './credentials.js';
+import type { SyonetCredentials } from './credentials.js';
+import { LeadJob } from '../../queue/types.js';
+import { NonRetryableJobError } from '../../queue/job-errors.js';
+import { SYONET_COMPANY_ACCESS_DENIED } from './errors.js';
+import { logger } from '../../utils/logger.js';
+import { LeadProcessResult, processLeadViaApi } from './api-client.js';
 
 export async function processLeadJob(job: LeadJob): Promise<LeadProcessResult> {
   logger.info(

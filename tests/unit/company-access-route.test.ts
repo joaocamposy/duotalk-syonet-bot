@@ -9,7 +9,7 @@ describe('Syonet configuration error responses', () => {
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
     process.env.QUEUE_DRIVER = 'memory';
-    process.env.MICROSERVICE_API_TOKEN = 'company-access-route-token';
+    process.env.API_TOKEN = 'company-access-route-token';
     process.env.CREDENTIAL_ENCRYPTION_KEY = randomBytes(32).toString('base64');
 
     const [{ buildApp }, { queueInstance }, { NonRetryableJobError }] = await Promise.all([
@@ -34,7 +34,7 @@ describe('Syonet configuration error responses', () => {
     failureCode = 'SYONET_COMPANY_ACCESS_DENIED';
     const response = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk?sync=true',
+      url: '/leads?sync=true',
       headers: { authorization: 'Bearer company-access-route-token' },
       payload: {
         credentials: {
@@ -60,7 +60,7 @@ describe('Syonet configuration error responses', () => {
 
     const retry = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk?sync=true',
+      url: '/leads?sync=true',
       headers: { authorization: 'Bearer company-access-route-token' },
       payload: {
         credentials: {
@@ -85,7 +85,7 @@ describe('Syonet configuration error responses', () => {
     failureCode = 'SYONET_EVENT_TYPE_MAPPING_NOT_FOUND';
     const response = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk?sync=true',
+      url: '/leads?sync=true',
       headers: { authorization: 'Bearer company-access-route-token' },
       payload: {
         credentials: {

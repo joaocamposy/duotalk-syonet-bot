@@ -9,9 +9,9 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - NODE_ENV=production
-      - TZ=America/Sao_Paulo
-      - MICROSERVICE_API_TOKEN=${MICROSERVICE_API_TOKEN}
+      - API_TOKEN=${API_TOKEN}
       - CREDENTIAL_ENCRYPTION_KEY=${CREDENTIAL_ENCRYPTION_KEY}
+      - QUEUE_ENABLED=${QUEUE_ENABLED:-true}
       - QUEUE_DRIVER=${QUEUE_DRIVER:-file}
       - QUEUE_FILE_PATH=${QUEUE_FILE_PATH:-/app/data/queue.json}
       - QUEUE_CONCURRENCY=${QUEUE_CONCURRENCY:-1}

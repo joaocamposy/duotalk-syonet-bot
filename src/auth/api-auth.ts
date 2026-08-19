@@ -7,7 +7,7 @@ function digest(value: string): Buffer {
 
 export function isAuthorizedConsumer(
   authorizationHeader: string | undefined,
-  configuredToken: string = env.MICROSERVICE_API_TOKEN,
+  configuredToken: string = env.API_TOKEN,
 ): boolean {
   const bearerMatch = authorizationHeader?.match(/^Bearer\s+([^\s]+)$/i);
   if (!bearerMatch || !configuredToken.trim()) return false;

@@ -13,7 +13,6 @@ FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production
-ENV TZ=America/Sao_Paulo
 COPY package*.json ./
 RUN npm ci --omit=dev
 

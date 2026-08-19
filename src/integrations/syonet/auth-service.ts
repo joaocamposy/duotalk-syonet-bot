@@ -1,8 +1,8 @@
 import { constants, publicEncrypt } from 'node:crypto';
-import { logger } from '../utils/logger.js';
-import { env } from '../config/env.js';
-import { NonRetryableJobError } from '../queue/job-errors.js';
-import { syonetCredentialsSchema } from '../credentials/credential-envelope.js';
+import { logger } from '../../utils/logger.js';
+import { env } from '../../config/env.js';
+import { NonRetryableJobError } from '../../queue/job-errors.js';
+import { syonetCredentialsSchema } from './credentials.js';
 
 const COOKIE_PATTERN = /(?:^|,\s*)([!#$%&'*+\-.^_`|~0-9A-Za-z]+)=([^;,\s]*)/g;
 

@@ -1,7 +1,7 @@
 {
   "name": "duotalk-syonet-bot",
   "version": "1.0.0",
-  "description": "API webhook para integrar Duotalk ao Syonet CRM via HTTP com suporte a filas resilientes",
+  "description": "API para integrar leads do Duotalk ao Syonet CRM via HTTP com suporte a filas resilientes",
   "main": "dist/server.js",
   "type": "module",
   "engines": {

@@ -5,9 +5,9 @@ import {
   HttpSyonetGateway,
   processLeadViaApi,
   SyonetGateway,
-} from '../../src/crawler/syonet-api-client.js';
-import { DuotalkLeadData } from '../../src/types/duotalk-payload.js';
-import { SyonetCredentials } from '../../src/credentials/credential-envelope.js';
+} from '../../src/integrations/syonet/api-client.js';
+import { DuotalkLeadData } from '../../src/types/lead-request.js';
+import { SyonetCredentials } from '../../src/integrations/syonet/credentials.js';
 
 const credentials: SyonetCredentials = {
   url: 'https://crm.example.com',
@@ -24,6 +24,7 @@ const { publicKey } = generateKeyPairSync('rsa', {
 
 class RecordingGateway implements SyonetGateway {
   readonly getPaths: string[] = [];
+  readonly patches: Array<{ path: string; body: unknown }> = [];
   readonly posts: Array<{ path: string; body: unknown }> = [];
   readonly operations: string[] = [];
 
@@ -43,6 +44,15 @@ class RecordingGateway implements SyonetGateway {
       throw new Error(`Resposta não configurada para POST ${path}`);
     }
     return this.responses.get(`POST ${path}`) as T;
+  }
+
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    this.patches.push({ path, body });
+    this.operations.push(`PATCH ${path}`);
+    if (!this.responses.has(`PATCH ${path}`)) {
+      throw new Error(`Resposta não configurada para PATCH ${path}`);
+    }
+    return this.responses.get(`PATCH ${path}`) as T;
   }
 }
 
@@ -107,9 +117,11 @@ describe('processLeadViaApi', () => {
 
     expect(result).toEqual({
       clientCreated: true,
+      clientUpdated: false,
       clientId: -100,
       companyId: 25,
       dryRun: false,
+      eventCreated: true,
       eventId: 200,
       mapping: {
         contactForm: 'WHATSAPP',
@@ -147,18 +159,204 @@ describe('processLeadViaApi', () => {
     });
   });
 
-  it('reutiliza cliente encontrado e cria somente a oportunidade', async () => {
-    const gateway = new RecordingGateway(
-      makeSuccessfulResponses([
-        { idCliente: -55, telefoneCelular: { ddd: '61', numero: '993351327' } },
-      ]),
-    );
+  it('reutiliza sem PATCH quando o cliente já possui os dados atuais', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'LEAD@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    const gateway = new RecordingGateway(responses);
 
     const result = await processLeadViaApi(makeLead(), credentials, target, gateway);
 
     expect(result.clientCreated).toBe(false);
+    expect(result.clientUpdated).toBe(false);
     expect(result.clientId).toBe(-55);
+    expect(gateway.patches).toHaveLength(0);
     expect(gateway.posts.map((post) => post.path)).toEqual(['/api/evento']);
+  });
+
+  it('reutiliza a oportunidade da mesma conversa sem criar outro evento', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO',
+      [
+        {
+          idEvento: 321,
+          observacao: 'Lead recebido via Duotalk\nID conversa: conversa-123\nCanal: WhatsApp 360',
+        },
+      ],
+    );
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(
+      makeLead({ idConversa: 'conversa-123' }),
+      credentials,
+      target,
+      gateway,
+    );
+
+    expect(result).toMatchObject({ eventCreated: false, eventId: 321 });
+    expect(gateway.posts).toHaveLength(0);
+  });
+
+  it('cria outra oportunidade quando o cliente inicia uma conversa diferente', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO',
+      [{ idEvento: 321, observacao: 'ID conversa: conversa-anterior' }],
+    );
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(
+      makeLead({ idConversa: 'conversa-nova' }),
+      credentials,
+      target,
+      gateway,
+    );
+
+    expect(result).toMatchObject({ eventCreated: true, eventId: 200 });
+    expect(gateway.posts.map((post) => post.path)).toEqual(['/api/evento']);
+  });
+
+  it('serializa processamentos simultâneos da mesma conversa', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    const baseGateway = new RecordingGateway(responses);
+    const eventSearchPath =
+      '/api/evento?idCliente=-55&idEmpresa=25&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO';
+    let eventCreated = false;
+    let eventPosts = 0;
+    const gateway: SyonetGateway = {
+      get: async <T>(path: string): Promise<T> => {
+        if (path === eventSearchPath) {
+          return (
+            eventCreated ? [{ idEvento: 200, observacao: 'ID conversa: conversa-simultanea' }] : []
+          ) as T;
+        }
+        return baseGateway.get<T>(path);
+      },
+      patch: <T>(path: string, body: unknown) => baseGateway.patch<T>(path, body),
+      post: async <T>(path: string, body: unknown): Promise<T> => {
+        if (path === '/api/evento') {
+          eventPosts++;
+          eventCreated = true;
+        }
+        return baseGateway.post<T>(path, body);
+      },
+    };
+    const lead = makeLead({ idConversa: 'conversa-simultanea' });
+
+    const results = await Promise.all([
+      processLeadViaApi(lead, credentials, target, gateway),
+      processLeadViaApi(lead, credentials, target, gateway),
+    ]);
+
+    expect(eventPosts).toBe(1);
+    expect(results.map((result) => result.eventCreated).sort()).toEqual([false, true]);
+    expect(results.map((result) => result.eventId)).toEqual([200, 200]);
+  });
+
+  it('abre e atualiza parcialmente o cliente desatualizado antes da oportunidade', async () => {
+    const responses = makeSuccessfulResponses([
+      { idCliente: -55, telefoneCelular: { ddd: '61', numero: '993351327' } },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Nome Antigo',
+      email: null,
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set('PATCH /api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+    });
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(makeLead(), credentials, target, gateway);
+
+    expect(result.clientCreated).toBe(false);
+    expect(result.clientUpdated).toBe(true);
+    expect(gateway.patches).toEqual([
+      {
+        path: '/api/cliente/-55',
+        body: { nomeCliente: 'Lead Teste', email: 'lead@example.com' },
+      },
+    ]);
+    expect(gateway.operations.slice(-2)).toEqual(['PATCH /api/cliente/-55', 'POST /api/evento']);
+  });
+
+  it('atualiza o telefone celular principal quando o número foi localizado em outro contato', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        telefones: [{ tipo: 'COMERCIAL', ddd: '61', numero: '993351327' }],
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '988888888' },
+      telefones: [{ tipo: 'COMERCIAL', ddd: '61', numero: '993351327' }],
+    });
+    responses.set('PATCH /api/cliente/-55', { idCliente: -55 });
+    const gateway = new RecordingGateway(responses);
+
+    await processLeadViaApi(makeLead(), credentials, target, gateway);
+
+    expect(gateway.patches[0]).toEqual({
+      path: '/api/cliente/-55',
+      body: { telefoneCelular: { ddd: '61', numero: '993351327' } },
+    });
   });
 
   it('não repete o fluxo inteiro quando o cliente foi criado e o evento ficou ambíguo', async () => {
@@ -212,9 +410,11 @@ describe('processLeadViaApi', () => {
 
     expect(result).toEqual({
       clientCreated: false,
+      clientUpdated: false,
       clientId: null,
       companyId: 25,
       dryRun: true,
+      eventCreated: false,
       eventId: null,
       mapping: {
         contactForm: 'WHATSAPP',
@@ -227,7 +427,36 @@ describe('processLeadViaApi', () => {
     expect(gateway.getPaths).toHaveLength(6);
   });
 
-  it('valida o de/para no dry-run e falha sem executar POST', async () => {
+  it('abre mas não atualiza cliente desatualizado no modo dry-run', async () => {
+    const responses = makeSuccessfulResponses([
+      { idCliente: -55, telefoneCelular: { ddd: '61', numero: '993351327' } },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Nome Antigo',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(
+      makeLead({ dryRun: true }),
+      credentials,
+      target,
+      gateway,
+    );
+
+    expect(result).toMatchObject({
+      clientCreated: false,
+      clientUpdated: false,
+      clientId: -55,
+      dryRun: true,
+    });
+    expect(gateway.getPaths).toContain('/api/cliente/-55');
+    expect(gateway.patches).toHaveLength(0);
+    expect(gateway.posts).toHaveLength(0);
+  });
+
+  it('valida o de/para no dry-run e falha sem executar escrita', async () => {
     const responses = makeSuccessfulResponses([]);
     responses.set('/api/usuario/1671/tipoevento?idEmpresa=25', [
       {
@@ -301,5 +530,41 @@ describe('processLeadViaApi', () => {
         (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
       ),
     ).toHaveLength(2);
+  });
+
+  it('não renova a sessão nem repete um PATCH recusado por autenticação', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('', {
+          status: 200,
+          headers: { 'set-cookie': 'JSESSIONID=initial; Path=/' },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ valor: publicKey }, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(null, {
+          status: 302,
+          headers: { 'set-cookie': 'JSESSIONID=authenticated; Path=/' },
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ idUsuario: 1671 }, { status: 200 }))
+      .mockResolvedValueOnce(Response.json({ message: 'sessão expirada' }, { status: 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const gateway = new HttpSyonetGateway(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+    );
+
+    await expect(gateway.patch('/api/cliente/-55', { nomeCliente: 'Novo' })).rejects.toMatchObject({
+      name: 'NonRetryableJobError',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(
+      fetchMock.mock.calls.filter(
+        (call) => (call[1] as RequestInit | undefined)?.method === 'PATCH',
+      ),
+    ).toHaveLength(1);
   });
 });

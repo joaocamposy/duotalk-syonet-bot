@@ -8,13 +8,15 @@ const envSchema = z
     PORT: z.coerce.number().int().min(0).max(65_535).default(3000),
     HOST: z.string().default('0.0.0.0'),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    TZ: z.literal('America/Sao_Paulo').default('America/Sao_Paulo'),
-
     // Autenticação do microsserviço e criptografia da fila
-    MICROSERVICE_API_TOKEN: z.string().trim().default(''),
+    API_TOKEN: z.string().trim().default(''),
     CREDENTIAL_ENCRYPTION_KEY: z.string().trim().default(''),
 
     // Fila & Dedup
+    QUEUE_ENABLED: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((value) => value === 'true'),
     QUEUE_DRIVER: z.enum(['memory', 'file']).default('file'),
     QUEUE_FILE_PATH: z.string().trim().min(1).default('./data/queue.json'),
     QUEUE_CONCURRENCY: z.coerce.number().int().min(1).max(10).default(1),
@@ -35,10 +37,10 @@ const envSchema = z
   })
   .superRefine((config, context) => {
     if (config.NODE_ENV === 'production') {
-      if (config.MICROSERVICE_API_TOKEN.trim().length < 32) {
+      if (config.API_TOKEN.trim().length < 32) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['MICROSERVICE_API_TOKEN'],
+          path: ['API_TOKEN'],
           message: 'Deve possuir ao menos 32 caracteres em produção',
         });
       }
@@ -63,7 +65,6 @@ const parseEnv = () => {
     console.error('❌ Configuração inválida no .env:', result.error.format());
     throw new Error('Falha na validação das variáveis de ambiente');
   }
-  process.env.TZ = result.data.TZ;
   return result.data;
 };
 

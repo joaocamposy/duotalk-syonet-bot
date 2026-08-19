@@ -1,18 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { duotalkLeadDataSchema } from '../../types/duotalk-payload.js';
-import type { DuotalkLeadData } from '../../types/duotalk-payload.js';
+import { duotalkLeadDataSchema } from '../../types/lead-request.js';
+import type { DuotalkLeadData } from '../../types/lead-request.js';
 import { JobProcessor, QueueDriver, QueueStats, LeadJob } from '../types.js';
 import { logger } from '../../utils/logger.js';
-import type { EncryptedCredentialEnvelope } from '../../credentials/credential-envelope.js';
+import type { EncryptedCredentialEnvelope } from '../../integrations/syonet/credentials.js';
+import { NonRetryableJobError, QueueCapacityError } from '../job-errors.js';
+import { syonetTargetSchema, SyonetTarget } from '../../integrations/syonet/target.js';
 import {
   isSyonetConfigurationErrorCode,
-  NonRetryableJobError,
-  QueueCapacityError,
   SYONET_COMPANY_ACCESS_DENIED,
-} from '../job-errors.js';
-import { syonetTargetSchema, SyonetTarget } from '../../types/syonet-target.js';
+} from '../../integrations/syonet/errors.js';
 
 function isCanonicalBase64(value: unknown, expectedBytes?: number): value is string {
   if (typeof value !== 'string' || !value) return false;

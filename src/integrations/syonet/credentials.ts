@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { z } from 'zod';
-import { env } from '../config/env.js';
+import { env } from '../../config/env.js';
 
 export const syonetCredentialsSchema = z
   .object({

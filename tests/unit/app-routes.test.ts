@@ -24,7 +24,7 @@ describe('HTTP routes', () => {
     process.env.NODE_ENV = 'test';
     process.env.QUEUE_DRIVER = 'memory';
     process.env.QUEUE_MAX_JOBS = '7';
-    process.env.MICROSERVICE_API_TOKEN = 'route-test-token';
+    process.env.API_TOKEN = 'route-test-token';
     process.env.CREDENTIAL_ENCRYPTION_KEY = randomBytes(32).toString('base64');
     const { buildApp } = await import('../../src/app.js');
     app = buildApp({ startWorker: false });
@@ -35,11 +35,11 @@ describe('HTTP routes', () => {
     await app.close();
   });
 
-  it('protege webhook e endpoints da fila com Bearer', async () => {
-    const webhook = await app.inject({ method: 'POST', url: '/webhook/duotalk', payload });
+  it('protege endpoint de leads e endpoints da fila com Bearer', async () => {
+    const leadRequest = await app.inject({ method: 'POST', url: '/leads', payload });
     const queue = await app.inject({ method: 'GET', url: '/queue/status' });
 
-    expect(webhook.statusCode).toBe(401);
+    expect(leadRequest.statusCode).toBe(401);
     expect(queue.statusCode).toBe(401);
   });
 
@@ -76,13 +76,21 @@ describe('HTTP routes', () => {
         },
       ],
       paths: {
-        '/webhook/duotalk': {
+        '/leads': {
           post: {
             responses: {
               200: { description: 'Lead processado; resultado disponível' },
               202: { description: 'Lead aceito para processamento em background' },
               400: { description: 'Payload ou requisição inválida' },
               401: { description: 'Token de acesso ausente ou inválido' },
+              503: {
+                description:
+                  'Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado',
+              },
+              504: {
+                description:
+                  'Prazo síncrono esgotado; job não cancelado e ainda pendente ou em processamento',
+              },
             },
           },
         },
@@ -97,7 +105,7 @@ describe('HTTP routes', () => {
     };
     const response = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization: 'Bearer route-test-token' },
       payload: invalidPayload,
     });
@@ -110,7 +118,7 @@ describe('HTTP routes', () => {
   it('responde 400 para JSON malformado em vez de erro interno', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: {
         authorization: 'Bearer route-test-token',
         'content-type': 'application/json',
@@ -122,11 +130,29 @@ describe('HTTP routes', () => {
     expect(response.json()).toEqual({ success: false, message: 'Requisição HTTP inválida' });
   });
 
+  it('recusa também o modo assíncrono quando não existe worker ativo', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/leads',
+      headers: { authorization: 'Bearer route-test-token' },
+      payload,
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      success: false,
+      message: 'Processamento indisponível: nenhum worker ativo registrado',
+    });
+    expect(response.json()).not.toHaveProperty('jobId');
+  });
+
   it('enfileira com token válido sem expor credenciais ou dados pessoais na consulta', async () => {
+    const { queueInstance } = await import('../../src/queue/queue-manager.js');
+    queueInstance.process(() => new Promise(() => undefined));
     const authorization = 'Bearer route-test-token';
     const accepted = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization },
       payload,
     });
@@ -152,19 +178,20 @@ describe('HTTP routes', () => {
   it('retorna o job anterior quando a conversa é duplicada', async () => {
     const duplicate = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization: 'Bearer route-test-token' },
       payload,
     });
 
     expect(duplicate.statusCode).toBe(202);
-    expect(duplicate.json()).toMatchObject({ duplicate: true, status: 'pending' });
+    expect(duplicate.json()).toMatchObject({ duplicate: true });
+    expect(['pending', 'processing']).toContain(duplicate.json().status);
   });
 
   it('não confunde dry-run com a gravação real da mesma conversa', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
@@ -179,14 +206,20 @@ describe('HTTP routes', () => {
   it('não persiste conversa, lead ou telefone em texto claro na chave de deduplicação', async () => {
     const [{ buildDedupKey }, { duotalkLeadDataSchema }] = await Promise.all([
       import('../../src/controllers/lead-controller.js'),
-      import('../../src/types/duotalk-payload.js'),
+      import('../../src/types/lead-request.js'),
     ]);
     const leadData = duotalkLeadDataSchema.parse(payload.data);
     const key = buildDedupKey(leadData, payload.credentials.url, payload.target);
+    const updatedContactKey = buildDedupKey(
+      { ...leadData, nome: 'Teste das rotas atualizado' },
+      payload.credentials.url,
+      payload.target,
+    );
 
     expect(key).not.toContain(payload.data.idConversa);
     expect(key).not.toContain(payload.data.telefone);
     expect(key).toMatch(/^[a-f0-9]{64}:(dry-run|write):[a-f0-9]{64}$/);
+    expect(updatedContactKey).not.toBe(key);
 
     const sharedDigits = payload.data.telefone;
     const conversationKey = buildDedupKey(
@@ -213,7 +246,7 @@ describe('HTTP routes', () => {
     const request = (data: Record<string, unknown>) =>
       app.inject({
         method: 'POST',
-        url: '/webhook/duotalk',
+        url: '/leads',
         headers: { authorization: 'Bearer route-test-token' },
         payload: { ...payload, data: { ...payload.data, idConversa: undefined, ...data } },
       });
@@ -229,7 +262,7 @@ describe('HTTP routes', () => {
   it('não confunde a mesma conversa entre tenants Syonet diferentes', async () => {
     const otherTenant = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
@@ -244,7 +277,7 @@ describe('HTTP routes', () => {
   it('não confunde a mesma conversa entre unidades diferentes do mesmo Syonet', async () => {
     const otherCompany = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
@@ -264,7 +297,7 @@ describe('HTTP routes', () => {
     const request = () =>
       app.inject({
         method: 'POST',
-        url: '/webhook/duotalk',
+        url: '/leads',
         headers: { authorization: 'Bearer route-test-token' },
         payload: concurrentPayload,
       });
@@ -277,7 +310,7 @@ describe('HTTP routes', () => {
   it('responde 503 quando a fila não pode aceitar outro job com segurança', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
@@ -296,7 +329,7 @@ describe('HTTP routes', () => {
     const authorization = 'Bearer route-test-token';
     const existing = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization },
       payload,
     });
@@ -306,6 +339,7 @@ describe('HTTP routes', () => {
     job.status = 'completed';
     job.result = {
       clientCreated: false,
+      clientUpdated: false,
       clientId: 10,
       companyId: 25,
       dryRun: true,
@@ -315,7 +349,7 @@ describe('HTTP routes', () => {
 
     const duplicate = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization },
       payload,
     });
@@ -333,7 +367,7 @@ describe('HTTP routes', () => {
     const authorization = 'Bearer route-test-token';
     const existing = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization },
       payload,
     });
@@ -346,7 +380,7 @@ describe('HTTP routes', () => {
 
     const duplicate = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization },
       payload,
     });
@@ -360,7 +394,7 @@ describe('HTTP routes', () => {
     const companyPayload = { ...payload, target: { companyId: 26 } };
     const existing = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization },
       payload: companyPayload,
     });
@@ -373,7 +407,7 @@ describe('HTTP routes', () => {
 
     const corrected = await app.inject({
       method: 'POST',
-      url: '/webhook/duotalk',
+      url: '/leads',
       headers: { authorization },
       payload: companyPayload,
     });

@@ -3,15 +3,15 @@ import {
   selectContactForm,
   selectEventType,
   selectMedia,
-} from '../../src/crawler/syonet-mapping.js';
-import { DuotalkLeadData } from '../../src/types/duotalk-payload.js';
+} from '../../src/integrations/syonet/mapping.js';
+import { DuotalkLeadData } from '../../src/types/lead-request.js';
 import {
   isSyonetConfigurationErrorCode,
   SYONET_COMPANY_ACCESS_DENIED,
   SYONET_CONTACT_FORM_MAPPING_NOT_FOUND,
   SYONET_EVENT_TYPE_MAPPING_NOT_FOUND,
   SYONET_MEDIA_MAPPING_NOT_FOUND,
-} from '../../src/queue/job-errors.js';
+} from '../../src/integrations/syonet/errors.js';
 
 const lead: DuotalkLeadData = {
   nome: 'Lead de mapeamento',

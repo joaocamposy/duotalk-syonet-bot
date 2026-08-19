@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MemoryQueueDriver } from '../../src/queue/drivers/memory-queue-driver.js';
 import { FileQueueDriver } from '../../src/queue/drivers/file-queue-driver.js';
-import { DuotalkLeadData } from '../../src/types/duotalk-payload.js';
+import { DuotalkLeadData } from '../../src/types/lead-request.js';
 import { NonRetryableJobError, QueueCapacityError } from '../../src/queue/job-errors.js';
 
 const sampleLead: DuotalkLeadData = {
@@ -50,7 +50,14 @@ describe('Queue Drivers (Memory & File)', () => {
     let processedJobId = '';
     driver.process(async (j) => {
       processedJobId = j.id;
-      return { clientCreated: true, clientId: -10, companyId: 25, dryRun: false, eventId: 20 };
+      return {
+        clientCreated: true,
+        clientUpdated: false,
+        clientId: -10,
+        companyId: 25,
+        dryRun: false,
+        eventId: 20,
+      };
     });
 
     // Aguarda o microtick de processamento
@@ -61,6 +68,7 @@ describe('Queue Drivers (Memory & File)', () => {
     expect(stats.completed).toBe(1);
     expect((await driver.getJob(job.id))?.result).toEqual({
       clientCreated: true,
+      clientUpdated: false,
       clientId: -10,
       companyId: 25,
       dryRun: false,
@@ -91,6 +99,7 @@ describe('Queue Drivers (Memory & File)', () => {
     const driver = new FileQueueDriver(testFilePath, 1, 0);
     driver.process(async () => ({
       clientCreated: false,
+      clientUpdated: false,
       clientId: -10,
       companyId: 25,
       dryRun: false,
@@ -242,7 +251,14 @@ describe('Queue Drivers (Memory & File)', () => {
     driver.process(async () => {
       executions++;
       if (executions < 2) throw new Error('falha transitória');
-      return { clientCreated: false, clientId: -10, companyId: 25, dryRun: false, eventId: 20 };
+      return {
+        clientCreated: false,
+        clientUpdated: false,
+        clientId: -10,
+        companyId: 25,
+        dryRun: false,
+        eventId: 20,
+      };
     });
     const job = await driver.enqueue(sampleLead, credentialEnvelope, target);
 

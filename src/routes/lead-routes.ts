@@ -1,10 +1,10 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
-  handleDuotalkWebhook,
+  handleLeadRequest,
   getQueueStatus,
   getJobDetails,
 } from '../controllers/lead-controller.js';
-import { isAuthorizedConsumer } from '../auth/microservice-auth.js';
+import { isAuthorizedConsumer } from '../auth/api-auth.js';
 
 const basicErrorResponseSchema = {
   type: 'object',
@@ -32,9 +32,11 @@ const jobResultSchema = {
   type: 'object',
   properties: {
     clientCreated: { type: 'boolean' },
+    clientUpdated: { type: 'boolean' },
     clientId: { type: ['number', 'null'] },
     companyId: { type: 'integer' },
     dryRun: { type: 'boolean' },
+    eventCreated: { type: 'boolean' },
     eventId: { type: ['number', 'null'] },
     mapping: {
       type: 'object',
@@ -63,6 +65,17 @@ const jobAcceptanceResponseSchema = {
   },
 };
 
+const syncTimeoutResponseSchema = {
+  type: 'object',
+  required: ['success', 'message', 'jobId', 'status'],
+  properties: {
+    success: { type: 'boolean', enum: [false] },
+    message: { type: 'string' },
+    jobId: { type: 'string' },
+    status: { type: 'string', enum: ['pending', 'processing'] },
+  },
+};
+
 function describedResponse(description: string, schema: Record<string, unknown>) {
   return { description, ...schema };
 }
@@ -77,11 +90,10 @@ async function requireConsumerAuthorization(
 }
 
 export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
-  // Webhook Duotalk
-  fastify.post('/webhook/duotalk', {
+  fastify.post('/leads', {
     schema: {
       description: 'Recebe os dados do lead do Duotalk e enfileira para gravação no Syonet CRM',
-      tags: ['Webhook'],
+      tags: ['Leads'],
       security: [{ consumerToken: [] }],
       querystring: {
         type: 'object',
@@ -89,7 +101,8 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
           sync: {
             type: 'string',
             enum: ['true', 'false'],
-            description: 'Aguarda o job até SYNC_TIMEOUT_MS quando igual a true',
+            description:
+              'Aguarda o job até SYNC_TIMEOUT_MS quando true; retorna 504 com jobId se o prazo expirar',
           },
         },
       },
@@ -172,13 +185,17 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
           requestErrorResponseSchema,
         ),
         503: describedResponse(
-          'Fila ou processamento temporariamente indisponível',
+          'Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado',
           basicErrorResponseSchema,
+        ),
+        504: describedResponse(
+          'Prazo síncrono esgotado; job não cancelado e ainda pendente ou em processamento',
+          syncTimeoutResponseSchema,
         ),
       },
     },
     preHandler: requireConsumerAuthorization,
-    handler: handleDuotalkWebhook,
+    handler: handleLeadRequest,
   });
 
   // Healthcheck público sem detalhes internos

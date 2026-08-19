@@ -14,7 +14,8 @@ async function start() {
     if (env.NODE_ENV !== 'production') {
       logger.info({ documentationUrl: `${address}/docs` }, 'Documentação Swagger disponível');
     }
-    logger.info(`⚙️  Driver de fila ativo: [${env.QUEUE_DRIVER}]`);
+    if (env.QUEUE_ENABLED) logger.info(`⚙️  Driver de fila ativo: [${env.QUEUE_DRIVER}]`);
+    else logger.warn('Fila desativada por QUEUE_ENABLED=false');
   } catch (err) {
     logger.fatal({ err }, 'Erro ao iniciar servidor Fastify');
     process.exit(1);

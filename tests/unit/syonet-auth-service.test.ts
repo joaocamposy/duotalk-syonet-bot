@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { loginAndGetCookiesViaHttp } from '../../src/crawler/syonet-auth-service.js';
+import { loginAndGetCookiesViaHttp } from '../../src/integrations/syonet/auth-service.js';
 
 const { publicKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,

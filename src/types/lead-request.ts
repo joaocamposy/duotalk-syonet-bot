@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { syonetCredentialsSchema } from '../credentials/credential-envelope.js';
+import { syonetCredentialsSchema } from '../integrations/syonet/credentials.js';
 import { parsePhoneNumber } from '../utils/phone-parser.js';
-import { syonetTargetSchema } from './syonet-target.js';
+import { syonetTargetSchema } from '../integrations/syonet/target.js';
 import { sanitizeSensitiveText } from '../utils/sensitive-text.js';
 
 const optionalText = (maxLength: number) => z.string().trim().max(maxLength).optional();
@@ -44,11 +44,11 @@ export const duotalkLeadDataSchema = z.object({
   dryRun: z.boolean().optional(),
 });
 
-export const duotalkWebhookSchema = z.object({
+export const leadRequestSchema = z.object({
   credentials: syonetCredentialsSchema,
   target: syonetTargetSchema,
   data: duotalkLeadDataSchema,
 });
 
 export type DuotalkLeadData = z.infer<typeof duotalkLeadDataSchema>;
-export type DuotalkWebhookPayload = z.infer<typeof duotalkWebhookSchema>;
+export type LeadRequestPayload = z.infer<typeof leadRequestSchema>;

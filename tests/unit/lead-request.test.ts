@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { duotalkWebhookSchema, duotalkLeadDataSchema } from '../../src/types/duotalk-payload.js';
+import { leadRequestSchema, duotalkLeadDataSchema } from '../../src/types/lead-request.js';
 
 describe('Duotalk Payload Schema Validation', () => {
   it('deve validar com sucesso o payload completo do exemplo do Duotalk', () => {
@@ -30,7 +30,7 @@ describe('Duotalk Payload Schema Validation', () => {
       },
     };
 
-    const parsed = duotalkWebhookSchema.parse(rawPayload);
+    const parsed = leadRequestSchema.parse(rawPayload);
     expect(parsed.data.nome).toBe('Cliente Exemplo');
     expect(parsed.data.telefone).toBe('5561999998888');
     expect(parsed.data.intencao).toBe('DVNU - Veículos Novos');
@@ -91,15 +91,15 @@ describe('Duotalk Payload Schema Validation', () => {
     expect(parsed).not.toHaveProperty('syonetPass');
   });
 
-  it('exige credenciais separadas e URL HTTPS no webhook', () => {
+  it('exige credenciais separadas e URL HTTPS na requisição', () => {
     const data = {
       nome: 'Lead Teste',
       telefone: '5561999998888',
     };
 
-    expect(() => duotalkWebhookSchema.parse({ data })).toThrow();
+    expect(() => leadRequestSchema.parse({ data })).toThrow();
     expect(() =>
-      duotalkWebhookSchema.parse({
+      leadRequestSchema.parse({
         credentials: { url: 'http://crm.example.com', username: 'usuario', password: 'senha' },
         target: { companyId: 25 },
         data,
@@ -107,7 +107,7 @@ describe('Duotalk Payload Schema Validation', () => {
     ).toThrow('HTTPS');
 
     expect(() =>
-      duotalkWebhookSchema.parse({
+      leadRequestSchema.parse({
         credentials: { url: 'https://crm.example.com', username: 'usuario', password: 'senha' },
         target: { companyId: 0 },
         data,

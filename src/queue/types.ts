@@ -1,14 +1,16 @@
-import { DuotalkLeadData } from '../types/duotalk-payload.js';
-import { EncryptedCredentialEnvelope } from '../credentials/credential-envelope.js';
-import { SyonetTarget } from '../types/syonet-target.js';
+import { DuotalkLeadData } from '../types/lead-request.js';
+import { EncryptedCredentialEnvelope } from '../integrations/syonet/credentials.js';
+import { SyonetTarget } from '../integrations/syonet/target.js';
 
 export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
 export interface LeadJobResult {
   clientCreated: boolean;
+  clientUpdated: boolean;
   clientId: number | null;
   companyId: number;
   dryRun: boolean;
+  eventCreated: boolean;
   eventId: number | null;
   mapping?: {
     contactForm: string;

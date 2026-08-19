@@ -1,14 +1,11 @@
 import crypto from 'node:crypto';
-import { DuotalkLeadData } from '../../types/duotalk-payload.js';
+import { DuotalkLeadData } from '../../types/lead-request.js';
 import { JobProcessor, QueueDriver, QueueStats, LeadJob } from '../types.js';
 import { logger } from '../../utils/logger.js';
-import { EncryptedCredentialEnvelope } from '../../credentials/credential-envelope.js';
-import {
-  isSyonetConfigurationErrorCode,
-  NonRetryableJobError,
-  QueueCapacityError,
-} from '../job-errors.js';
-import { SyonetTarget } from '../../types/syonet-target.js';
+import { EncryptedCredentialEnvelope } from '../../integrations/syonet/credentials.js';
+import { NonRetryableJobError, QueueCapacityError } from '../job-errors.js';
+import { isSyonetConfigurationErrorCode } from '../../integrations/syonet/errors.js';
+import { SyonetTarget } from '../../integrations/syonet/target.js';
 
 export class MemoryQueueDriver implements QueueDriver {
   public name = 'memory';
