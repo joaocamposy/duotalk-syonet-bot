@@ -14,7 +14,6 @@ describe('credential envelope', () => {
       url: 'https://crm.example.com',
       username: 'usuario-secreto',
       password: 'senha-secreta',
-      version: '7',
     };
 
     const envelope = encryptCredentials(credentials, encryptionKey);

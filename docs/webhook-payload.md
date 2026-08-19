@@ -17,8 +17,7 @@ O Bearer autoriza o uso do microsserviço e não contém o login do Syonet. As c
   "credentials": {
     "url": "https://seu-tenant.syonet.com",
     "username": "usuario-tecnico",
-    "password": "senha",
-    "version": "1"
+    "password": "senha"
   },
   "target": {
     "companyId": 25
@@ -48,7 +47,6 @@ O Bearer autoriza o uso do microsserviço e não contém o login do Syonet. As c
 - `credentials.url` (Obrigatória, URL HTTPS do tenant Syonet)
 - `credentials.username` (Obrigatório)
 - `credentials.password` (Obrigatória)
-- `credentials.version` (Opcional; pode mudar para forçar a invalidação lógica do cache)
 - `target.companyId` (Obrigatório; empresa Syonet esperada para a sessão. É metadado do consumidor, não campo do Duotalk)
 - `nome` (Obrigatório, min 1 caractere)
 - `telefone` (Obrigatório; DDD + 8/9 dígitos, com DDI brasileiro `55` opcional). Exemplo: `5561993355555`.

@@ -10,7 +10,6 @@ describe('HTTP routes', () => {
       url: 'https://crm.example.com',
       username: 'usuario-nao-expor',
       password: 'senha-nao-expor',
-      version: '1',
     },
     target: { companyId: 25 },
     data: {

@@ -25,7 +25,6 @@ export const syonetCredentialsSchema = z
       .transform((url) => new URL(url).origin),
     username: z.string().trim().min(1).max(200),
     password: z.string().min(1).max(500),
-    version: z.string().trim().min(1).max(100).optional(),
   })
   .superRefine((credentials, context) => {
     const loginPayload = JSON.stringify({

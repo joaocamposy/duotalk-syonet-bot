@@ -254,20 +254,18 @@ export class HttpSyonetGateway implements SyonetGateway {
     private readonly url: string,
     private readonly user: string,
     private readonly pass: string,
-    credentialVersion?: string,
   ) {
     const validatedCredentials = syonetCredentialsSchema.safeParse({
       url,
       username: user,
       password: pass,
-      version: credentialVersion,
     });
     if (!validatedCredentials.success) {
       throw new NonRetryableJobError('Destino ou credenciais do Syonet recusados pela política');
     }
     this.baseUrl = validatedCredentials.data.url;
     this.cacheKey = createHash('sha256')
-      .update(JSON.stringify([this.baseUrl, user, pass, credentialVersion ?? 'current']))
+      .update(JSON.stringify([this.baseUrl, user, pass]))
       .digest('hex');
     this.cookieHeader = getCachedSession(this.cacheKey);
   }
@@ -362,13 +360,7 @@ export async function processLeadViaApi(
   gateway?: SyonetGateway,
 ): Promise<LeadProcessResult> {
   const api =
-    gateway ??
-    new HttpSyonetGateway(
-      credentials.url,
-      credentials.username,
-      credentials.password,
-      credentials.version,
-    );
+    gateway ?? new HttpSyonetGateway(credentials.url, credentials.username, credentials.password);
   const company = syonetCompanySchema.parse(await api.get<unknown>('/api/sessao/empresa'));
   if (company.idEmpresa !== target.companyId) {
     throw new NonRetryableJobError(

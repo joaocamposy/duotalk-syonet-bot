@@ -115,7 +115,6 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
                 writeOnly: true,
                 description: 'Compartilha com o usuário o limite de tamanho do payload RSA',
               },
-              version: { type: 'string', minLength: 1, maxLength: 100 },
             },
           },
           target: {

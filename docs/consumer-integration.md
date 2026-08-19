@@ -24,8 +24,7 @@ curl --request POST 'https://microservico.example.com/webhook/duotalk' \
     "credentials": {
       "url": "https://seu-tenant.syonet.com",
       "username": "usuario-do-syonet",
-      "password": "senha-do-syonet",
-      "version": "1"
+      "password": "senha-do-syonet"
     },
     "target": {
       "companyId": 25
@@ -96,7 +95,6 @@ const response = await fetch('https://microservico.example.com/webhook/duotalk',
       url: syonet.url,
       username: syonet.username,
       password: syonet.password,
-      version: syonet.version,
     },
     target: {
       companyId: syonet.companyId,
@@ -118,7 +116,6 @@ const job = await response.json();
 - Nunca registre o corpo completo da requisição ou o header `Authorization`.
 - Recupere a senha do gerenciador oficial apenas no momento da chamada.
 - Não grave a senha em tabelas de integração, filas secundárias ou mensagens de erro.
-- `credentials.version` é opcional e pode ser alterado para forçar a invalidação lógica de uma sessão; mudanças de usuário ou senha já geram outra chave de cache.
 - Configure timeout e retry somente para respostas em que a requisição comprovadamente não foi aceita.
 - Trate `401` como token do microsserviço ausente ou incorreto.
 - Trate `409` como repetição de um job já falho que exige conciliação antes de novo envio.
