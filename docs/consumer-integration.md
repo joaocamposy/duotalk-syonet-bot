@@ -2,9 +2,7 @@
 
 Este microsserviço recebe um lead e as credenciais do tenant Syonet na mesma requisição. O sistema consumidor continua responsável por armazenar, selecionar e rotacionar essas credenciais.
 
-Cada chamada pode informar uma URL e um login diferentes. Não existe URL, usuário ou senha padrão do Syonet no ambiente deste serviço.
-
-O deploy mantém apenas `SYONET_ALLOWED_HOSTS`, uma cerca de segurança com os hosts exatos que podem ser acessados. Ela não seleciona cliente nem armazena credenciais. Curingas, IPs, portas, URLs completas e destinos fora da lista são rejeitados com `400`.
+Cada chamada pode informar uma URL e um login diferentes. Não existe URL, usuário, senha ou cadastro prévio de tenants Syonet no ambiente deste serviço. A URL precisa usar HTTPS na porta padrão e não pode conter credenciais embutidas.
 
 ## Autorização
 

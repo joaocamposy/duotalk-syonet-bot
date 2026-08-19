@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   decryptCredentials,
   encryptCredentials,
-  isAllowedSyonetUrl,
   syonetCredentialsSchema,
 } from '../../src/credentials/credential-envelope.js';
 
@@ -43,20 +42,14 @@ describe('credential envelope', () => {
     ).toThrow('exatamente 32 bytes');
   });
 
-  it('aceita somente hosts exatos sem liberar subdomínios ou domínios parecidos', () => {
-    const allowedHosts = ['crm.example.com', 'filial.syonet.example.com'];
+  it('aceita dinamicamente a URL HTTPS informada pelo consumidor', () => {
+    const parsed = syonetCredentialsSchema.parse({
+      url: 'https://tenant-dinamico.example.com',
+      username: 'usuario',
+      password: 'senha',
+    });
 
-    expect(isAllowedSyonetUrl('https://crm.example.com/portal', allowedHosts)).toBe(true);
-    expect(isAllowedSyonetUrl('https://filial.syonet.example.com', allowedHosts)).toBe(true);
-    expect(isAllowedSyonetUrl('https://syonet.example.com', allowedHosts)).toBe(false);
-    expect(isAllowedSyonetUrl('https://outra.syonet.example.com', allowedHosts)).toBe(false);
-    expect(isAllowedSyonetUrl('https://crm.example.com.evil.test', allowedHosts)).toBe(false);
-  });
-
-  it('falha fechada sem allowlist e rejeita curingas e IPs', () => {
-    expect(isAllowedSyonetUrl('https://crm.example.com', [])).toBe(false);
-    expect(isAllowedSyonetUrl('https://evil.com', ['*.com'])).toBe(false);
-    expect(isAllowedSyonetUrl('https://127.0.0.1', ['127.0.0.1'])).toBe(false);
+    expect(parsed.url).toBe('https://tenant-dinamico.example.com');
   });
 
   it('normaliza a URL recebida para a origem HTTPS', () => {

@@ -18,7 +18,6 @@ API webhook em **Fastify + TypeScript + Zod** que recebe eventos de leads e cred
 - `src/types/syonet-target.ts`: Schema do destino Syonet informado fora do payload Duotalk.
 - `src/utils/`:
   - `phone-parser.ts`: Higienização e separação de DDI (55), DDD e número.
-  - `allowed-host.ts`: Validação da allowlist de hostnames Syonet exatos.
   - `logger.ts`: Logs JSON em stdout com redação de segredos para coleta pela plataforma.
   - `sensitive-text.ts`: Redação de tokens presentes em URLs recebidas nos textos do lead.
 - `src/auth/microservice-auth.ts`: Autorização Bearer dos sistemas consumidores.

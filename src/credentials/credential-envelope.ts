@@ -1,26 +1,6 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { env } from '../config/env.js';
-import { isValidExactHostname, parseExactHostList } from '../utils/allowed-host.js';
-
-function configuredAllowedHosts(): string[] {
-  return parseExactHostList(env.SYONET_ALLOWED_HOSTS);
-}
-
-export function isAllowedSyonetUrl(url: string, allowedHosts = configuredAllowedHosts()): boolean {
-  let hostname: string;
-  try {
-    hostname = new URL(url).hostname.toLowerCase();
-  } catch {
-    return false;
-  }
-  if (allowedHosts.length === 0) return false;
-
-  return allowedHosts.some((allowedHost) => {
-    const normalizedHost = allowedHost.toLowerCase();
-    return isValidExactHostname(normalizedHost) && hostname === normalizedHost;
-  });
-}
 
 export const syonetCredentialsSchema = z
   .object({
@@ -42,10 +22,6 @@ export const syonetCredentialsSchema = z
           return false;
         }
       }, 'A URL do Syonet deve usar a porta HTTPS padrão e não pode conter credenciais')
-      .refine(
-        (url) => isAllowedSyonetUrl(url),
-        'O host da URL do Syonet não está autorizado neste deploy',
-      )
       .transform((url) => new URL(url).origin),
     username: z.string().trim().min(1).max(200),
     password: z.string().min(1).max(500),

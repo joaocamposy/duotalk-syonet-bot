@@ -14,7 +14,7 @@ Este documento descreve a arquitetura interna do sistema de integração entre D
 3. **Processamento Assíncrono (Worker & HTTP)**:
    - O worker processa os jobs respeitando a concorrência (`QUEUE_CONCURRENCY`).
    - O Bearer autentica o sistema consumidor do microsserviço.
-   - A origem informada é confrontada com `SYONET_ALLOWED_HOSTS` antes de qualquer acesso de rede.
+   - A URL HTTPS e as credenciais do tenant são recebidas em cada requisição.
    - O login do Syonet recebido no corpo é criptografado antes de entrar na fila.
    - `target.companyId`, fornecido pelo consumidor fora de `data`, precisa coincidir com a empresa ativa da sessão antes de qualquer pesquisa ou escrita.
    - O worker descriptografa o envelope somente em memória durante o processamento.

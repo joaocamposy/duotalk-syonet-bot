@@ -18,7 +18,6 @@ O Compose usa um volume nomeado para `data/queue.json`, evitando depender das pe
 - `TZ=America/Sao_Paulo`: mantém o cálculo da próxima ação no fuso comercial esperado.
 - `MICROSERVICE_API_TOKEN`: token Bearer compartilhado somente com os sistemas consumidores autorizados.
 - `CREDENTIAL_ENCRYPTION_KEY`: chave de 32 bytes em Base64 usada para proteger o login do Syonet na fila. Gere com `openssl rand -base64 32`.
-- `SYONET_ALLOWED_HOSTS`: hostnames Syonet exatos, separados por vírgula, como `crm.cliente-a.example.com,crm.cliente-b.example.com`. Curingas, IPs, portas e URLs completas são proibidos. Esta variável limita destinos de rede; cada chamada ainda envia sua própria URL e suas credenciais.
 - `SYONET_HTTP_TIMEOUT_MS=15000`: limite de cada chamada ao CRM.
 - `SYNC_TIMEOUT_MS=60000`: após esse período, a resposta síncrona volta a ser assíncrona sem cancelar o job.
 - `SHUTDOWN_TIMEOUT_MS=30000`: tempo para concluir jobs ativos antes de encerrar o processo.

@@ -1,6 +1,5 @@
 import dotenv from 'dotenv';
 import { z } from 'zod';
-import { isValidExactHostname, parseExactHostList } from '../utils/allowed-host.js';
 
 dotenv.config();
 
@@ -14,7 +13,6 @@ const envSchema = z
     // Autenticação do microsserviço e criptografia da fila
     MICROSERVICE_API_TOKEN: z.string().trim().default(''),
     CREDENTIAL_ENCRYPTION_KEY: z.string().trim().default(''),
-    SYONET_ALLOWED_HOSTS: z.string().trim().default(''),
 
     // Fila & Dedup
     QUEUE_DRIVER: z.enum(['memory', 'file']).default('file'),
@@ -56,25 +54,6 @@ const envSchema = z
           message: 'Deve conter exatamente 32 bytes em Base64',
         });
       }
-    }
-
-    if (config.NODE_ENV !== 'test' && !config.SYONET_ALLOWED_HOSTS.trim()) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['SYONET_ALLOWED_HOSTS'],
-        message: 'Deve listar ao menos um host Syonet permitido',
-      });
-    }
-
-    const invalidHosts = parseExactHostList(config.SYONET_ALLOWED_HOSTS).filter(
-      (host) => !isValidExactHostname(host),
-    );
-    if (invalidHosts.length > 0) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['SYONET_ALLOWED_HOSTS'],
-        message: 'Aceita somente hostnames DNS exatos; curingas, IPs, portas e URLs são proibidos',
-      });
     }
   });
 

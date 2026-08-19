@@ -4,7 +4,6 @@ export default defineConfig({
   test: {
     env: {
       NODE_ENV: 'test',
-      SYONET_ALLOWED_HOSTS: 'crm.example.com,outro-crm.example.com',
     },
     globals: true,
     environment: 'node',

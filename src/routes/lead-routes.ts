@@ -101,7 +101,7 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
             type: 'object',
             required: ['url', 'username', 'password'],
             properties: {
-              url: { type: 'string', format: 'uri', description: 'Origem HTTPS autorizada' },
+              url: { type: 'string', format: 'uri', description: 'URL HTTPS do Syonet' },
               username: {
                 type: 'string',
                 minLength: 1,

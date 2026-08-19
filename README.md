@@ -17,7 +17,7 @@ API Webhook em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** e 
 - 📦 **Sistema de Filas Pluggable**: Suporte explícito aos drivers `memory` e `file`, sem fallback silencioso para tecnologias não implementadas.
 - 🔐 **Login HTTP criptografado**: Reproduz o fluxo RSA-OAEP e renova a sessão somente ao repetir leituras seguras.
 - 🗝️ **Credenciais protegidas**: Recebe o login do Syonet por HTTPS e o criptografa antes de persistir o job.
-- 🧱 **Destinos permitidos**: Restringe as URLs por requisição aos hosts autorizados no deploy.
+- 🌐 **Tenant dinâmico**: Recebe URL e credenciais do Syonet em cada requisição.
 - 🏬 **Unidade explícita**: Valida `target.companyId` contra a empresa ativa da sessão antes de qualquer operação no CRM.
 - 🧭 **De/para isolado e seguro**: Regras provisórias ficam em um único arquivo e valores desconhecidos interrompem o job antes de qualquer escrita.
 - 🧾 **Logs estruturados**: Saída JSON em stdout com redação automática de credenciais.
@@ -46,7 +46,6 @@ Configure o token dos consumidores e uma chave independente para criptografar a 
 ```env
 MICROSERVICE_API_TOKEN=gere-um-token-aleatorio-forte
 CREDENTIAL_ENCRYPTION_KEY=gere-com-openssl-rand-base64-32
-SYONET_ALLOWED_HOSTS=crm.cliente-a.example.com,crm.cliente-b.example.com
 ```
 
 O sistema consumidor usa o token no header:
@@ -56,8 +55,6 @@ Authorization: Bearer <MICROSERVICE_API_TOKEN>
 ```
 
 URL, usuário e senha do Syonet são enviados no objeto `credentials`. Antes do job ser persistido, esses valores são protegidos com AES-256-GCM e removidos do payload do lead.
-
-`SYONET_ALLOWED_HOSTS` aceita apenas hostnames exatos. Curingas, IPs, portas e URLs completas são rejeitados.
 
 Até a validação funcional, os de/para ficam centralizados em `src/config/syonet-mappings.ts`. Alterações de forma de contato, tipo de oportunidade ou mídia não exigem mudanças no fluxo HTTP nem na fila.
 

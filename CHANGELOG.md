@@ -19,8 +19,7 @@ Todas as mudanças relevantes deste projeto são registradas neste arquivo.
 
 - Autorização Bearer obrigatória nos endpoints operacionais.
 - Credenciais do Syonet protegidas com AES-256-GCM antes de entrar na fila.
-- Allowlist de destinos Syonet para reduzir risco de SSRF.
-- Allowlist passa a aceitar somente hostnames exatos e falha fechada quando vazia.
+- URL e credenciais do tenant Syonet fornecidas dinamicamente pelo consumidor autenticado.
 - Remoção de credenciais e dados pessoais dos resultados públicos e dos jobs terminais.
 - Redação de tokens encontrados em URLs dos textos recebidos.
 - Bloqueio de repetição automática quando uma escrita no CRM pode ter resultado ambíguo.

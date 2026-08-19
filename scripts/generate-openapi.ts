@@ -6,7 +6,6 @@ async function generateOpenApiSpec() {
   console.log('🚀 Gerando especificação OpenAPI (JSON e YAML)...');
   process.env.NODE_ENV = 'test';
   process.env.QUEUE_DRIVER = 'memory';
-  process.env.SYONET_ALLOWED_HOSTS = 'crm.example.com';
   const { buildApp } = await import('../src/app.js');
   const app = buildApp({ startWorker: false });
   await app.ready();
