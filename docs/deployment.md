@@ -15,15 +15,16 @@ O Compose usa um volume nomeado para `data/queue.json`, evitando depender das pe
 ## 2. Variáveis de Ambiente Críticas
 
 - `NODE_ENV=production`
-- `TZ=America/Sao_Paulo`: mantém o cálculo da próxima ação no fuso comercial esperado.
-- `MICROSERVICE_API_TOKEN`: token Bearer compartilhado somente com os sistemas consumidores autorizados.
+- `API_TOKEN`: token Bearer compartilhado somente com os sistemas consumidores autorizados.
 - `CREDENTIAL_ENCRYPTION_KEY`: chave de 32 bytes em Base64 usada para proteger o login do Syonet na fila. Gere com `openssl rand -base64 32`.
 - `SYONET_HTTP_TIMEOUT_MS=15000`: limite de cada chamada ao CRM.
-- `SYNC_TIMEOUT_MS=60000`: após esse período, a resposta síncrona volta a ser assíncrona sem cancelar o job.
+- `SYNC_TIMEOUT_MS=60000`: após esse período, a chamada síncrona responde `504` com o `jobId`, sem cancelar o job já aceito.
 - `SHUTDOWN_TIMEOUT_MS=30000`: tempo para concluir jobs ativos antes de encerrar o processo.
+- `QUEUE_ENABLED=true`: chave operacional da fila. Com `false`, não inicializa o driver configurado nem o worker e `POST /leads` responde `503` sem criar job.
 - `QUEUE_RETRY_BASE_DELAY_MS=1000`: base do atraso exponencial para falhas seguramente repetíveis.
 - `QUEUE_MAX_JOBS=1000`: limite absoluto de jobs mantidos. Ao atingir o limite, jobs terminais antigos são removidos primeiro; se todos ainda estiverem ativos, novos leads recebem `503`.
 - `QUEUE_DRIVER=file` para persistência local ou `memory` para execução efêmera.
+- Mesmo com `QUEUE_ENABLED=true`, `POST /leads` responde `503` sem criar job quando não existe worker ativo, inclusive no modo assíncrono.
 - `JOB_RETENTION_DAYS=7`: remove jobs concluídos ou falhos e seus dados pessoais após a retenção.
 - `LOG_LEVEL=info`: nível dos logs estruturados enviados para stdout.
 

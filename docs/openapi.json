@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Duotalk Syonet Bot API",
-    "description": "API Webhook de integração do Duotalk ao Syonet CRM via HTTP",
+    "description": "API de integração de leads do Duotalk com o Syonet CRM via HTTP",
     "version": "1.0.0"
   },
   "components": {
@@ -16,9 +16,9 @@
     "schemas": {}
   },
   "paths": {
-    "/webhook/duotalk": {
+    "/leads": {
       "post": {
-        "tags": ["Webhook"],
+        "tags": ["Leads"],
         "description": "Recebe os dados do lead do Duotalk e enfileira para gravação no Syonet CRM",
         "requestBody": {
           "required": true,
@@ -92,7 +92,7 @@
             "in": "query",
             "name": "sync",
             "required": false,
-            "description": "Aguarda o job até SYNC_TIMEOUT_MS quando igual a true"
+            "description": "Aguarda o job até SYNC_TIMEOUT_MS quando true; retorna 504 com jobId se o prazo expirar"
           }
         ],
         "security": [{ "consumerToken": [] }],
@@ -119,9 +119,11 @@
                       "type": "object",
                       "properties": {
                         "clientCreated": { "type": "boolean" },
+                        "clientUpdated": { "type": "boolean" },
                         "clientId": { "type": ["null", "number"] },
                         "companyId": { "type": "integer" },
                         "dryRun": { "type": "boolean" },
+                        "eventCreated": { "type": "boolean" },
                         "eventId": { "type": ["null", "number"] },
                         "mapping": {
                           "type": "object",
@@ -162,9 +164,11 @@
                       "type": "object",
                       "properties": {
                         "clientCreated": { "type": "boolean" },
+                        "clientUpdated": { "type": "boolean" },
                         "clientId": { "type": ["null", "number"] },
                         "companyId": { "type": "integer" },
                         "dryRun": { "type": "boolean" },
+                        "eventCreated": { "type": "boolean" },
                         "eventId": { "type": ["null", "number"] },
                         "mapping": {
                           "type": "object",
@@ -241,9 +245,11 @@
                       "type": "object",
                       "properties": {
                         "clientCreated": { "type": "boolean" },
+                        "clientUpdated": { "type": "boolean" },
                         "clientId": { "type": ["null", "number"] },
                         "companyId": { "type": "integer" },
                         "dryRun": { "type": "boolean" },
+                        "eventCreated": { "type": "boolean" },
                         "eventId": { "type": ["null", "number"] },
                         "mapping": {
                           "type": "object",
@@ -319,16 +325,34 @@
             }
           },
           "503": {
-            "description": "Fila ou processamento temporariamente indisponível",
+            "description": "Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado",
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Fila ou processamento temporariamente indisponível",
+                  "description": "Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado",
                   "type": "object",
                   "required": ["success", "message"],
                   "properties": {
                     "success": { "type": "boolean" },
                     "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Prazo síncrono esgotado; job não cancelado e ainda pendente ou em processamento",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Prazo síncrono esgotado; job não cancelado e ainda pendente ou em processamento",
+                  "type": "object",
+                  "required": ["success", "message", "jobId", "status"],
+                  "properties": {
+                    "success": { "type": "boolean", "enum": [false] },
+                    "message": { "type": "string" },
+                    "jobId": { "type": "string" },
+                    "status": { "type": "string", "enum": ["pending", "processing"] }
                   }
                 }
               }
@@ -472,9 +496,11 @@
                           "type": "object",
                           "properties": {
                             "clientCreated": { "type": "boolean" },
+                            "clientUpdated": { "type": "boolean" },
                             "clientId": { "type": ["null", "number"] },
                             "companyId": { "type": "integer" },
                             "dryRun": { "type": "boolean" },
+                            "eventCreated": { "type": "boolean" },
                             "eventId": { "type": ["null", "number"] },
                             "mapping": {
                               "type": "object",

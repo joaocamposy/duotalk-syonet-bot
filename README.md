@@ -1,6 +1,6 @@
 # Duotalk -> Syonet CRM Integration Bot 🤖
 
-API Webhook em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** e usa as rotas HTTP do **Syonet CRM** para pesquisar clientes, cadastrar contatos e registrar oportunidades.
+API em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** e usa as rotas HTTP do **Syonet CRM** para pesquisar clientes, cadastrar contatos e registrar oportunidades.
 
 ---
 
@@ -9,10 +9,10 @@ API Webhook em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** e 
 - 📞 **Tratamento de Telefone**: Extração automática do DDI (`55`), separação de DDD e número (com e sem hífen).
 - 🔄 **Busca Prévia Inteligente**:
   - **Cenário A (Contato Inexistente)**: Preenche e cadastra novo contato.
-  - **Cenário B (Contato Existente)**: Reutiliza o cadastro localizado sem sobrescrever dados do cliente.
-- 🎯 **Criação de Oportunidade (Novo Evento)**: Registra o evento no CRM vinculado ao contato criado ou localizado.
+  - **Cenário B (Contato Existente)**: Abre o cadastro e atualiza somente nome, email informado ou telefone celular que estejam desatualizados.
+- 🎯 **Oportunidade por conversa**: Registra o evento no CRM e reutiliza a oportunidade existente quando a mesma `idConversa` é reenviada.
 - ⚡ **Modos de Execução**: Suporte a processamento **Assíncrono via Fila** (padrão 202 Accepted) e **Síncrono sob demanda** (`?sync=true`).
-- 🔄 **Desduplicação por tenant**: Ignora requisições repetidas por `idConversa`, `id` ou telefone sem confundir tenants Syonet diferentes.
+- 🔄 **Desduplicação em duas camadas**: Ignora requisições idênticas na fila, aceita dados de contato atualizados e impede que isso duplique a oportunidade da mesma conversa no Syonet.
 - 🛑 **Rate Limit**: Proteção contra inundações via `@fastify/rate-limit` configurável no `.env`.
 - 📦 **Sistema de Filas Pluggable**: Suporte explícito aos drivers `memory` e `file`, sem fallback silencioso para tecnologias não implementadas.
 - 🔐 **Login HTTP criptografado**: Reproduz o fluxo RSA-OAEP e renova a sessão somente ao repetir leituras seguras.
@@ -44,19 +44,19 @@ cp .env.example .env
 Configure o token dos consumidores e uma chave independente para criptografar a fila:
 
 ```env
-MICROSERVICE_API_TOKEN=gere-um-token-aleatorio-forte
+API_TOKEN=gere-um-token-aleatorio-forte
 CREDENTIAL_ENCRYPTION_KEY=gere-com-openssl-rand-base64-32
 ```
 
 O sistema consumidor usa o token no header:
 
 ```http
-Authorization: Bearer <MICROSERVICE_API_TOKEN>
+Authorization: Bearer <API_TOKEN>
 ```
 
 URL, usuário e senha do Syonet são enviados no objeto `credentials`. Antes do job ser persistido, esses valores são protegidos com AES-256-GCM e removidos do payload do lead.
 
-Até a validação funcional, os de/para ficam centralizados em `src/config/syonet-mappings.ts`. Alterações de forma de contato, tipo de oportunidade ou mídia não exigem mudanças no fluxo HTTP nem na fila.
+Até a validação funcional, os de/para ficam centralizados em `src/integrations/syonet/mapping-config.ts`. Alterações de forma de contato, tipo de oportunidade ou mídia não exigem mudanças no fluxo HTTP nem na fila.
 
 ### 3. Instalação de Dependências
 
@@ -91,7 +91,7 @@ npm run test:coverage
 
 # Enviar um payload completo para o microsserviço local
 # O JSON deve conter credentials, target e data; use dryRun=true para validar
-# unidade, pesquisa e de/para sem executar nenhum POST no Syonet.
+# unidade, pesquisa e de/para sem executar POST ou PATCH no Syonet.
 npm run test:lead < payload.local.json
 
 # Somente para a gravação real controlada, após conferir o dry-run:
@@ -111,9 +111,9 @@ npm run format
 ## 📑 Documentação Detalhada (`docs/`)
 
 - 📐 [Arquitetura & Filas](docs/architecture.md)
-- 📩 [Payload do Webhook Duotalk](docs/webhook-payload.md)
+- 📩 [Requisição de lead](docs/lead-request.md)
 - 🤝 [Guia para sistemas consumidores](docs/consumer-integration.md)
-- 🔌 [Integração HTTP com o Syonet](docs/syonet-crawler.md)
+- 🔌 [Integração HTTP com o Syonet](docs/integrations/syonet.md)
 - 🚀 [Guia de Deploy & Docker](docs/deployment.md)
 - 📝 [Histórico de mudanças](CHANGELOG.md)
 - 🤖 [Guia de Governança AGENTS.md](AGENTS.md)

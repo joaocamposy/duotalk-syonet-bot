@@ -1,10 +1,10 @@
-# Especificação do Payload do Webhook Duotalk
+# Especificação da requisição de lead
 
 Documentação técnica do formato de payload enviado pelo Duotalk para a API.
 
 ## Endpoint
 
-- **URL**: `POST /webhook/duotalk`
+- **URL**: `POST /leads`
 - **Content-Type**: `application/json`
 - **Authorization**: `Bearer <token do consumidor>` compartilhado pelo responsável pelo microsserviço
 
@@ -48,12 +48,13 @@ O Bearer autoriza o uso do microsserviço e não contém o login do Syonet. As c
 - `credentials.username` (Obrigatório)
 - `credentials.password` (Obrigatória)
 - `target.companyId` (Obrigatório; empresa Syonet esperada para a sessão. É metadado do consumidor, não campo do Duotalk)
+- `idConversa` (Opcional no contrato, mas necessário para garantir a reutilização da oportunidade em reenvios; deve permanecer estável durante toda a conversa)
 - `nome` (Obrigatório, min 1 caractere)
 - `telefone` (Obrigatório; DDD + 8/9 dígitos, com DDI brasileiro `55` opcional). Exemplo: `5561993355555`.
 - `email` (Opcional, formato de email)
 - `intencao` (Opcional, ex: "DVNU - Veículos Novos")
 - `operador` (Opcional, ex: "Jessica Helaine")
 - `firstMessage` (Opcional; primeira mensagem da conversa, limitada a 10.000 caracteres)
-- `dryRun` (Opcional; quando `true`, autentica, pesquisa e valida os de/para sem executar `POST` no Syonet)
+- `dryRun` (Opcional; quando `true`, autentica, pesquisa, abre o cliente encontrado e valida os de/para sem executar `POST` ou `PATCH` no Syonet)
 
 `mensagem`, `firstMessage`, `messageHistory` e `url_duotalk` compõem a observação da oportunidade. O serviço aceita até 50.000 caracteres de histórico, mas retém somente os primeiros 8.000, limite aproveitável pela observação. Parâmetros sensíveis conhecidos em URLs são substituídos por `[REDACTED]` antes da persistência.

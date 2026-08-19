@@ -6,10 +6,10 @@ Cada chamada pode informar uma URL e um login diferentes. Não existe URL, usuá
 
 ## Autorização
 
-O responsável pelo deploy fornece ao time consumidor o valor de `MICROSERVICE_API_TOKEN`. Envie-o em todas as chamadas protegidas:
+O responsável pelo deploy fornece ao time consumidor o valor de `API_TOKEN`. Envie-o em todas as chamadas protegidas:
 
 ```http
-Authorization: Bearer <MICROSERVICE_API_TOKEN>
+Authorization: Bearer <API_TOKEN>
 ```
 
 Esse token autoriza o consumo da API. Ele não é o usuário ou a senha do Syonet.
@@ -17,7 +17,7 @@ Esse token autoriza o consumo da API. Ele não é o usuário ou a senha do Syone
 ## Criar um lead
 
 ```bash
-curl --request POST 'https://microservico.example.com/webhook/duotalk' \
+curl --request POST 'https://microservico.example.com/leads' \
   --header 'Authorization: Bearer SEU_TOKEN_DO_MICROSSERVICO' \
   --header 'Content-Type: application/json' \
   --data '{
@@ -52,7 +52,7 @@ Resposta assíncrona:
 }
 ```
 
-Para uma homologação pontual, acrescente `?sync=true`. O serviço aguarda até `SYNC_TIMEOUT_MS`; se o processamento continuar, responde `202` e o job deve ser consultado normalmente. Em produção, prefira o fluxo assíncrono.
+Para uma homologação pontual, acrescente `?sync=true`. O serviço aguarda até `SYNC_TIMEOUT_MS`; se o processamento continuar, responde `504` com `success: false`, `jobId` e o estado atual. O job não é cancelado e deve ser consultado antes de qualquer reenvio. Em produção, prefira o fluxo assíncrono.
 
 ## Consultar o resultado
 
@@ -61,7 +61,9 @@ curl --header 'Authorization: Bearer SEU_TOKEN_DO_MICROSSERVICO' \
   'https://microservico.example.com/queue/jobs/43c4f81d-50ef-46df-9386-e445de8b458d'
 ```
 
-Quando concluído, o objeto `result` contém `companyId`, `clientId`, `eventId`, informa se o cliente foi criado e apresenta em `mapping` os valores de forma de contato, grupo/tipo de evento e mídia efetivamente selecionados. A consulta pública do job não devolve o payload do lead, o destino, o erro bruto, usuário, senha ou envelope criptografado.
+Quando concluído, o objeto `result` contém `companyId`, `clientId`, `eventId`, informa em `clientCreated` se o cliente foi criado, em `clientUpdated` se um cadastro existente foi atualizado e em `eventCreated` se uma nova oportunidade foi criada. Quando `eventCreated` é `false` fora do modo `dryRun`, `eventId` identifica a oportunidade existente reutilizada. O resultado também apresenta em `mapping` os valores de forma de contato, grupo/tipo de evento e mídia efetivamente selecionados. A consulta pública do job não devolve o payload do lead, o destino, o erro bruto, usuário, senha ou envelope criptografado.
+
+Quando o telefone já pertence a um cliente, o serviço abre o cadastro completo e compara nome, email e telefone celular. Somente os campos informados e diferentes são enviados ao Syonet antes da criação da oportunidade; a ausência de email no payload não apaga o email existente.
 
 `target.companyId` não pertence ao payload Duotalk. O sistema consumidor deve obtê-lo junto da credencial selecionada e enviá-lo separadamente. O microsserviço compara esse valor com a empresa ativa da sessão antes de pesquisar ou gravar qualquer cliente.
 
@@ -75,19 +77,23 @@ Forma de contato, tipo de oportunidade e mídia também são validados antes do 
 
 Esses códigos também retornam `422` no modo síncrono. Eles indicam ajuste de configuração. Depois de corrigir a unidade ou o de/para, o mesmo identificador pode ser reenviado e gera um job novo.
 
-Para homologar sem gravar, envie `dryRun: true`. O serviço executa todas as leituras, valida a unidade e todos os de/para e devolve o `mapping` selecionado, mas não chama nenhum endpoint `POST` do Syonet.
+Para homologar sem gravar, envie `dryRun: true`. O serviço executa todas as leituras, incluindo a abertura de um cliente encontrado, valida a unidade e todos os de/para e devolve o `mapping` selecionado, mas não chama endpoints `POST` ou `PATCH` do Syonet.
 
 O modo `dryRun` possui um escopo de deduplicação separado da gravação. Portanto, o envio real posterior com o mesmo `idConversa` ou `id` não é confundido com a homologação.
+
+Uma repetição com o mesmo identificador e os mesmos dados normalizados de nome, email e telefone é deduplicada. Se um desses dados mudar, a nova requisição é aceita para que o cadastro existente possa ser atualizado.
+
+Depois dessa atualização, a integração também protege a oportunidade no Syonet: a mesma `idConversa` reutiliza o evento já gravado, enquanto outra conversa do mesmo cliente pode criar uma nova oportunidade. Por isso, envie sempre um `idConversa` estável e não o gere novamente a cada tentativa.
 
 No repositório, `npm run test:lead < payload.local.json` carrega o `.env` e aceita por padrão somente `data.dryRun: true`. Depois de conferir o resultado, uma gravação intencional pode ser liberada apenas para aquela execução com `ALLOW_WRITE_TEST=true npm run test:lead < payload.local.json`.
 
 ## Exemplo com JavaScript
 
 ```js
-const response = await fetch('https://microservico.example.com/webhook/duotalk', {
+const response = await fetch('https://microservico.example.com/leads', {
   method: 'POST',
   headers: {
-    Authorization: `Bearer ${process.env.MICROSERVICE_API_TOKEN}`,
+    Authorization: `Bearer ${process.env.API_TOKEN}`,
     'Content-Type': 'application/json',
   },
   body: JSON.stringify({
@@ -124,7 +130,8 @@ const job = await response.json();
 - Trate `429` como limite de chamadas excedido e respeite o intervalo antes de tentar novamente.
 - Trate `200` como lead processado e resultado disponível; o corpo contém `status: "completed"` e pode indicar `duplicate: true` quando o resultado já existia.
 - Trate `202` como lead aceito para processamento em background. Preserve o `jobId` e consulte seu status.
-- Trate `503` como indisponibilidade temporária ou backpressure da fila. O reenvio é seguro somente quando a resposta não trouxe `jobId`; aplique atraso exponencial.
+- Trate `503` como fila desativada por configuração, worker ausente, indisponibilidade temporária ou backpressure. O serviço não aceita chamadas síncronas nem assíncronas com `QUEUE_ENABLED=false` ou sem worker ativo. O reenvio é seguro quando a resposta não trouxe `jobId`; aplique atraso exponencial.
+- Trate `504` como prazo síncrono esgotado. Como o corpo contém `jobId`, não reenvie imediatamente: consulte o job para evitar duplicação enquanto ele ainda estiver pendente ou em processamento.
 
 ## Responsabilidades deste microsserviço
 
