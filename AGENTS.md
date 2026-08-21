@@ -6,7 +6,7 @@ Este documento fornece as regras, convenções e orientações técnicas para qu
 
 ## 1. Visão Geral do Projeto
 
-API em **Fastify + TypeScript + Zod** que recebe leads e credenciais por cliente do **Duotalk**, protege o login na fila e usa HTTP para pesquisar, criar ou atualizar contatos no **Syonet CRM** e registrar Oportunidades.
+API em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** e as credenciais do ambiente **Syonet CRM** escolhido pelo consumidor. A aplicação protege o login na fila e usa HTTP para pesquisar, criar ou atualizar contatos e registrar oportunidades.
 
 ---
 
@@ -35,10 +35,11 @@ API em **Fastify + TypeScript + Zod** que recebe leads e credenciais por cliente
   - `mapping.ts`: Seleção fail-closed de forma de contato, tipo de evento e mídia.
   - `target.ts`: Schema do destino Syonet informado fora do payload Duotalk.
   - `time-zone.ts`: Fuso fixo usado no processo e nas chamadas ao Syonet.
+  - `response-json.ts`: Leitura limitada das respostas JSON recebidas do Syonet.
 - `src/controllers/lead-controller.ts`: Endpoint de leads e consulta da fila.
 - `src/routes/lead-routes.ts`: Rotas Fastify e Swagger.
 - `src/shutdown/graceful-shutdown.ts`: Encerramento HTTP e espera limitada dos jobs ativos.
-- `src/app.ts` & `src/server.ts`: Inicialização, middlewares e Graceful Shutdown.
+- `src/app.ts` e `src/server.ts`: Inicialização, middlewares e encerramento gracioso.
 
 ---
 
@@ -63,5 +64,6 @@ Se for necessário adicionar uma nova funcionalidade ou ajustar contratos/rotas 
    ```bash
    npm run lint
    npm run format
+   npm run build
    npm test
    ```

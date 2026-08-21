@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "Duotalk Syonet Bot API",
+    "title": "API de Integração Duotalk–Syonet",
     "description": "API de integração de leads do Duotalk com o Syonet CRM via HTTP",
     "version": "1.0.0"
   },
@@ -10,7 +10,7 @@
       "consumerToken": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Token que autoriza o sistema consumidor a usar o microsserviço"
+        "description": "Token que autoriza o sistema consumidor a usar a API"
       }
     },
     "schemas": {}
@@ -19,7 +19,7 @@
     "/leads": {
       "post": {
         "tags": ["Leads"],
-        "description": "Recebe os dados do lead do Duotalk e enfileira para gravação no Syonet CRM",
+        "description": "Recebe os dados do lead do Duotalk e processa sincronamente por padrão. Para o modo assíncrono, habilite a fila e use POST /leads?sync=false",
         "requestBody": {
           "required": true,
           "content": {
@@ -28,6 +28,15 @@
                 "type": "object",
                 "required": ["credentials", "target", "data"],
                 "properties": {
+                  "dryRun": {
+                    "type": "boolean",
+                    "description": "Controle de execução; true valida o fluxo sem executar POST ou PATCH no Syonet"
+                  },
+                  "daysToUpdateOpenEvent": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "Quando maior que zero, reutiliza a oportunidade aberta mais recente do mesmo cliente, empresa, grupo e tipo dentro desta quantidade de dias e adiciona a nova observação como comentário"
+                  },
                   "credentials": {
                     "type": "object",
                     "required": ["url", "username", "password"],
@@ -63,8 +72,19 @@
                     "required": ["nome", "telefone"],
                     "additionalProperties": true,
                     "properties": {
-                      "id": { "type": "string", "maxLength": 200 },
-                      "idConversa": { "type": "string", "maxLength": 200 },
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$"
+                      },
+                      "idConversa": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "pattern": "^[^\\u0000-\\u001F\\u007F-\\u009F]+$",
+                        "description": "Identidade idempotente da oportunidade; obrigatória quando dryRun não é true"
+                      },
                       "origem": { "type": "string", "minLength": 1, "maxLength": 100 },
                       "canal": { "type": "string", "minLength": 1, "maxLength": 100 },
                       "qualificacaoLead": { "type": "string", "minLength": 1, "maxLength": 100 },
@@ -77,24 +97,42 @@
                       "firstMessage": { "type": "string", "maxLength": 10000 },
                       "messageHistory": { "type": "string", "maxLength": 50000 },
                       "url_duotalk": { "type": "string", "maxLength": 2048 },
-                      "intencao": { "type": "string", "maxLength": 200 },
-                      "dryRun": { "type": "boolean" }
+                      "intencao": { "type": "string", "maxLength": 200 }
                     }
                   }
+                }
+              },
+              "example": {
+                "credentials": {
+                  "url": "https://seu-tenant.syonet.com",
+                  "username": "usuario-tecnico",
+                  "password": "senha"
+                },
+                "target": { "companyId": 25 },
+                "dryRun": true,
+                "daysToUpdateOpenEvent": 30,
+                "data": {
+                  "id": "lead-a1b2c3",
+                  "idConversa": "conversa-a1b2c3",
+                  "origem": "Outbound",
+                  "canal": "WhatsApp 360",
+                  "qualificacaoLead": "Lead",
+                  "intermediario": "Duotalk",
+                  "operador": "Operador Exemplo",
+                  "nome": "Teste Duotalk a1b2c3",
+                  "telefone": "5561999998888",
+                  "email": "teste.duotalk.a1b2c3@example.com",
+                  "mensagem": "Mensagem: Conversa criada manualmente",
+                  "firstMessage": "Olá, gostaria de conhecer os veículos disponíveis.",
+                  "messageHistory": "(20/08/2026, 10:00:00) Teste Duotalk a1b2c3: Olá, gostaria de conhecer os veículos disponíveis.",
+                  "url_duotalk": "https://app.duotalk.io/apps/inbox/start-conversation?name=Teste%20Duotalk%20a1b2c3&phone=5561999998888",
+                  "intencao": "DVNU - Veículos Novos"
                 }
               }
             }
           }
         },
-        "parameters": [
-          {
-            "schema": { "type": "string", "enum": ["true", "false"] },
-            "in": "query",
-            "name": "sync",
-            "required": false,
-            "description": "Aguarda o job até SYNC_TIMEOUT_MS quando true; retorna 504 com jobId se o prazo expirar"
-          }
-        ],
+        "parameters": [],
         "security": [{ "consumerToken": [] }],
         "responses": {
           "200": {
@@ -103,51 +141,108 @@
               "application/json": {
                 "schema": {
                   "description": "Lead processado; resultado disponível",
-                  "type": "object",
-                  "required": ["success", "message", "jobId", "status"],
-                  "properties": {
-                    "success": { "type": "boolean" },
-                    "message": { "type": "string" },
-                    "jobId": { "type": "string" },
-                    "status": {
-                      "type": "string",
-                      "enum": ["pending", "processing", "completed", "failed"]
-                    },
-                    "duplicate": { "type": "boolean" },
-                    "errorCode": { "type": "string" },
-                    "result": {
+                  "anyOf": [
+                    {
                       "type": "object",
+                      "required": ["success", "message", "jobId", "status"],
                       "properties": {
-                        "clientCreated": { "type": "boolean" },
-                        "clientUpdated": { "type": "boolean" },
-                        "clientId": { "type": ["null", "number"] },
-                        "companyId": { "type": "integer" },
-                        "dryRun": { "type": "boolean" },
-                        "eventCreated": { "type": "boolean" },
-                        "eventId": { "type": ["null", "number"] },
-                        "mapping": {
+                        "success": { "type": "boolean" },
+                        "message": { "type": "string" },
+                        "jobId": { "type": "string" },
+                        "status": {
+                          "type": "string",
+                          "enum": ["pending", "processing", "completed", "failed"]
+                        },
+                        "duplicate": { "type": "boolean" },
+                        "errorCode": { "type": "string" },
+                        "result": {
                           "type": "object",
-                          "required": ["contactForm", "eventGroupId", "eventTypeId", "media"],
+                          "required": [
+                            "clientCreated",
+                            "clientUpdated",
+                            "clientId",
+                            "companyId",
+                            "dryRun",
+                            "eventCreated",
+                            "eventId",
+                            "mapping"
+                          ],
+                          "additionalProperties": false,
                           "properties": {
-                            "contactForm": { "type": "string" },
-                            "eventGroupId": { "type": "string" },
-                            "eventTypeId": { "type": "string" },
-                            "media": { "type": "string" }
+                            "clientCreated": { "type": "boolean" },
+                            "clientUpdated": { "type": "boolean" },
+                            "clientId": { "type": ["null", "number"] },
+                            "companyId": { "type": "integer" },
+                            "dryRun": { "type": "boolean" },
+                            "eventCreated": { "type": "boolean" },
+                            "eventId": { "type": ["null", "number"] },
+                            "mapping": {
+                              "type": "object",
+                              "required": ["contactForm", "eventGroupId", "eventTypeId", "media"],
+                              "properties": {
+                                "contactForm": { "type": "string" },
+                                "eventGroupId": { "type": "string" },
+                                "eventTypeId": { "type": "string" },
+                                "media": { "type": "string" }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "required": ["success", "message", "status", "result"],
+                      "properties": {
+                        "success": { "type": "boolean", "enum": [true] },
+                        "message": { "type": "string" },
+                        "status": { "type": "string", "enum": ["completed"] },
+                        "result": {
+                          "type": "object",
+                          "required": [
+                            "clientCreated",
+                            "clientUpdated",
+                            "clientId",
+                            "companyId",
+                            "dryRun",
+                            "eventCreated",
+                            "eventId",
+                            "mapping"
+                          ],
+                          "additionalProperties": false,
+                          "properties": {
+                            "clientCreated": { "type": "boolean" },
+                            "clientUpdated": { "type": "boolean" },
+                            "clientId": { "type": ["null", "number"] },
+                            "companyId": { "type": "integer" },
+                            "dryRun": { "type": "boolean" },
+                            "eventCreated": { "type": "boolean" },
+                            "eventId": { "type": ["null", "number"] },
+                            "mapping": {
+                              "type": "object",
+                              "required": ["contactForm", "eventGroupId", "eventTypeId", "media"],
+                              "properties": {
+                                "contactForm": { "type": "string" },
+                                "eventGroupId": { "type": "string" },
+                                "eventTypeId": { "type": "string" },
+                                "media": { "type": "string" }
+                              }
+                            }
                           }
                         }
                       }
                     }
-                  }
+                  ]
                 }
               }
             }
           },
           "202": {
-            "description": "Lead aceito para processamento em background",
+            "description": "Lead aceito para processamento em segundo plano",
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Lead aceito para processamento em background",
+                  "description": "Lead aceito para processamento em segundo plano",
                   "type": "object",
                   "required": ["success", "message", "jobId", "status"],
                   "properties": {
@@ -162,6 +257,17 @@
                     "errorCode": { "type": "string" },
                     "result": {
                       "type": "object",
+                      "required": [
+                        "clientCreated",
+                        "clientUpdated",
+                        "clientId",
+                        "companyId",
+                        "dryRun",
+                        "eventCreated",
+                        "eventId",
+                        "mapping"
+                      ],
+                      "additionalProperties": false,
                       "properties": {
                         "clientCreated": { "type": "boolean" },
                         "clientUpdated": { "type": "boolean" },
@@ -243,6 +349,17 @@
                     "errorCode": { "type": "string" },
                     "result": {
                       "type": "object",
+                      "required": [
+                        "clientCreated",
+                        "clientUpdated",
+                        "clientId",
+                        "companyId",
+                        "dryRun",
+                        "eventCreated",
+                        "eventId",
+                        "mapping"
+                      ],
+                      "additionalProperties": false,
                       "properties": {
                         "clientCreated": { "type": "boolean" },
                         "clientUpdated": { "type": "boolean" },
@@ -325,11 +442,11 @@
             }
           },
           "503": {
-            "description": "Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado",
+            "description": "Modo assíncrono indisponível, processador ausente ou fila temporariamente sem capacidade",
             "content": {
               "application/json": {
                 "schema": {
-                  "description": "Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado",
+                  "description": "Modo assíncrono indisponível, processador ausente ou fila temporariamente sem capacidade",
                   "type": "object",
                   "required": ["success", "message"],
                   "properties": {
@@ -494,6 +611,17 @@
                         "errorCode": { "type": "string" },
                         "result": {
                           "type": "object",
+                          "required": [
+                            "clientCreated",
+                            "clientUpdated",
+                            "clientId",
+                            "companyId",
+                            "dryRun",
+                            "eventCreated",
+                            "eventId",
+                            "mapping"
+                          ],
+                          "additionalProperties": false,
                           "properties": {
                             "clientCreated": { "type": "boolean" },
                             "clientUpdated": { "type": "boolean" },
@@ -579,10 +707,7 @@
     {
       "url": "{baseUrl}",
       "variables": {
-        "baseUrl": {
-          "default": "http://localhost:3000",
-          "description": "Endereço base do microsserviço"
-        }
+        "baseUrl": { "default": "http://localhost:3000", "description": "Endereço base da API" }
       }
     }
   ]

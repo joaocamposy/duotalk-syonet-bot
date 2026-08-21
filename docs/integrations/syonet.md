@@ -4,23 +4,13 @@ O serviço usa as mesmas rotas HTTP consumidas pelo portal oficial do Syonet. N�
 
 ## Proteção das credenciais
 
-1. `Authorization: Bearer` autentica o sistema que consome o microsserviço.
+1. `Authorization: Bearer` autentica o sistema que consome a API.
 2. O objeto `credentials` traz URL, usuário e senha do Syonet por uma conexão HTTPS.
-3. O controller valida os valores e os cifra imediatamente com AES-256-GCM.
-4. A fila persiste as credenciais somente como IV, texto cifrado e tag de autenticação. Enquanto o job está pendente, os dados do lead permanecem no arquivo protegido por modo `0600` e pela criptografia do volume.
-5. O worker descriptografa o envelope em memória e executa o login. A fila remove o envelope e o payload pessoal quando o job termina, com sucesso ou falha definitiva.
+3. No fluxo direto, o controlador mantém os valores somente em memória durante a chamada.
+4. Quando a fila está habilitada, o controlador cifra os valores com AES-256-GCM. A fila persiste somente IV, texto cifrado e tag de autenticação para as credenciais.
+5. O processador descriptografa o envelope em memória e executa o login. Credenciais e dados pessoais são removidos quando o job termina.
 
 O consumidor também envia `target.companyId`, fora do objeto `data`. Imediatamente após o login, o serviço consulta `/api/sessao/empresa`. Se a empresa ativa for diferente, encerra o job com `SYONET_COMPANY_ACCESS_DENIED` antes de pesquisar ou gravar dados.
-
-Objeto recebido:
-
-```json
-{
-  "url": "https://crm.example.com",
-  "username": "usuario-tecnico",
-  "password": "senha"
-}
-```
 
 A chave `CREDENTIAL_ENCRYPTION_KEY` protege somente o trânsito temporário pela fila; ela não substitui o gerenciamento das credenciais feito pelo sistema consumidor.
 
@@ -32,9 +22,9 @@ A chave `CREDENTIAL_ENCRYPTION_KEY` protege somente o trânsito temporário pela
 4. `POST /portal/validarLogonUsuario.do?opcaoAtualizacao` autentica e devolve os cookies.
 5. `GET /api/sessao/usuario` confirma que a sessão está válida.
 
-Os cookies ficam somente na memória. Uma resposta `401`, `403` ou redirect inesperado renova a sessão uma vez somente em leituras. Nenhum `POST` ou `PATCH` de escrita no CRM é repetido automaticamente, inclusive após rejeição de autenticação, timeout, falha de rede, redirect ou resposta inválida; o resultado exige conciliação conservadora. O `POST` de login, que não cria registros, pode ser repetido após falha transitória do servidor.
+Os cookies ficam somente na memória. Em leituras, uma resposta `401`, `403` ou um redirecionamento inesperado renova a sessão uma única vez. Escritas nunca são repetidas automaticamente depois de rejeição de autenticação, tempo limite, falha de rede, redirecionamento ou resposta inválida. No processamento em fila, o login — que não cria registros no CRM — pode ser repetido após uma falha transitória do servidor.
 
-Todas as chamadas usam `SYONET_HTTP_TIMEOUT_MS`. Redirecionamentos inesperados em leituras provocam uma renovação da sessão; depois de uma escrita, são tratados como resultado ambíguo e não são repetidos. As respostas são validadas antes de seus IDs ou metadados serem usados.
+Cada chamada respeita `SYONET_HTTP_TIMEOUT_MS`, cada corpo JSON é limitado por `SYONET_HTTP_MAX_RESPONSE_BYTES`, e o fluxo completo respeita `SYONET_PROCESS_TIMEOUT_MS`. As respostas são validadas antes do uso de seus identificadores ou metadados.
 
 ## Processamento do lead
 
@@ -45,21 +35,29 @@ Todas as chamadas usam `SYONET_HTTP_TIMEOUT_MS`. Redirecionamentos inesperados e
 5. Se o cliente não existir, cria em `POST /api/cliente` com o formato nativo do Syonet.
 6. Se o cliente existir e houver diferença, envia somente os campos alterados em `PATCH /api/cliente/{idCliente}`.
 7. Resolve forma de contato, tipo de oportunidade e mídia pelas regras centralizadas em `src/integrations/syonet/mapping-config.ts`.
-8. Para um cliente existente e com `idConversa`, consulta as oportunidades do mesmo cliente, empresa e tipo de evento. Se a observação já contiver exatamente esse identificador de conversa, reutiliza o evento encontrado; caso contrário, cria a oportunidade em `POST /api/evento`.
-9. Retorna `companyId`, `idCliente`, `idEvento` e informa em `eventCreated` se uma nova oportunidade foi criada.
+8. Para um cliente existente, consulta as oportunidades do mesmo cliente e empresa, independentemente do tipo atual. Se o cabeçalho técnico da observação corresponder à `idConversa`, reutiliza o evento encontrado.
+9. Quando `daysToUpdateOpenEvent` é maior que zero e a conversa ainda não foi localizada, procura uma oportunidade aberta do mesmo cliente, empresa, grupo e tipo dentro da janela. Se encontrar, inclui a nova observação em `POST /api/evento/{idEvento}/acao` como comentário.
+10. Cria a oportunidade em `POST /api/evento` somente quando nenhuma regra encontra um evento reutilizável.
+11. Retorna `companyId`, `clientId`, `eventId` e informa em `eventCreated` se uma nova oportunidade foi criada.
 
-O payload recebido é considerado a fonte mais recente para nome, email informado e telefone celular. Campos sem valor no payload não apagam dados existentes. Comparações de nome ignoram diferenças apenas de caixa e espaços; comparações de email também ignoram caixa. Com `dryRun: true`, o serviço autentica, pesquisa e abre o cliente, consulta as opções do tenant e valida todo o de/para, mas não executa `POST` nem `PATCH`. O resultado informa em `mapping` a forma de contato, o grupo/tipo de evento e a mídia que seriam usados.
+O payload recebido é considerado a fonte mais recente para nome, email informado e telefone celular. Campos ausentes não apagam dados existentes. As comparações de nome e email ignoram diferenças de caixa; a comparação de nome também normaliza espaços. Com `dryRun: true`, o serviço autentica, pesquisa e abre o cliente, consulta as opções do ambiente e valida todo o de/para, mas não executa `POST` nem `PATCH`. O resultado informa em `mapping` os valores que seriam usados.
 
 O cadastro envia ao Syonet somente os dados disponíveis no payload de referência do Duotalk e usa `validateFields: false` para permitir o cadastro parcial.
 
-Os de/para atuais são provisórios e deliberadamente conservadores. A forma de contato tenta `canal`, depois `origem` e somente aliases declarados; o tipo de evento usa `qualificacaoLead` e `intencao`; a mídia usa `intermediario`. Não existe fallback silencioso. Se o Syonet não oferecer uma opção confirmada, o fluxo falha antes de criar cliente ou oportunidade. Na validação funcional, somente o arquivo de configuração de mapeamentos deve ser alterado.
+Os de/para atuais são provisórios e deliberadamente conservadores. A forma de contato tenta `canal`, depois `origem` e somente equivalências declaradas; o tipo de evento usa `qualificacaoLead` e `intencao`; a mídia usa `intermediario`. Não existe alternativa implícita. Se o Syonet não oferecer uma opção confirmada, o fluxo falha antes de criar cliente ou oportunidade. Na validação funcional, somente o arquivo de configuração de mapeamentos deve ser alterado.
 
 Textos usados na observação do evento são limitados e URLs têm parâmetros sensíveis conhecidos, como `token` e `access_token`, redigidos antes da fila e novamente antes do envio ao CRM.
 
 ## Duplicação de oportunidades
 
-`idConversa` é a identidade da ocorrência comercial. Reenvios da mesma conversa podem atualizar os dados do cliente, mas não criam outra oportunidade. Uma conversa diferente do mesmo telefone continua autorizada a criar uma nova oportunidade.
+`idConversa` é a identidade obrigatória da ocorrência comercial em gravações. Reenvios da mesma conversa podem atualizar os dados do cliente, mas não criam outra oportunidade.
 
-A consulta considera o cliente, a empresa e o tipo de evento e confirma o identificador pela linha `ID conversa: ...` gravada na observação. A data do Syonet não compõe a identidade: o payload de origem não possui uma data estruturada do evento e `dataProximaAcao` é calculada por esta integração. Usá-la como chave faria um reenvio em outro dia escapar da proteção. Se mais de uma oportunidade já possuir o mesmo identificador, o processamento falha sem criar outra e exige conciliação.
+A consulta considera o cliente e a empresa e confirma o identificador por um marcador SHA-256 no cabeçalho reservado da observação. Para compatibilidade, também reconhece o cabeçalho legado criado por esta integração, mas nunca procura o marcador em mensagens ou histórico. O tipo de evento e a data não compõem a identidade: ambos podem mudar entre reenvios, e `dataProximaAcao` é calculada pela integração. Se mais de uma oportunidade já possuir o mesmo identificador, o processamento falha sem criar outra e exige conciliação.
 
-Uma falha de rede após iniciar `POST /api/cliente`, `PATCH /api/cliente/{idCliente}` ou `POST /api/evento` é considerada ambígua. O job não é repetido automaticamente, evitando duplicação ou sobreposição incerta; ele deve ser conciliado usando os dados do CRM e o identificador da conversa.
+Se a pesquisa atingir o limite de 200 oportunidades sem localizar a conversa, o serviço também falha de forma conservadora com `SYONET_DATA_CONFLICT`. Ele não cria um novo evento enquanto não puder provar que a conversa está ausente.
+
+Por padrão, uma conversa diferente continua autorizada a criar outra oportunidade. Com `daysToUpdateOpenEvent > 0`, a integração procura eventos com status `ANDAMENTO`, `AGUARDANDO` ou `PENDENTE`, do mesmo cliente, empresa, grupo e tipo, e considera somente os criados dentro da quantidade de dias informada. Escolhe o mais recente e adiciona a nova observação como comentário. O valor `0` ou a ausência do campo desativa essa regra.
+
+O comentário recebe o mesmo marcador técnico da conversa. Antes de adicioná-lo, a integração consulta as ações do evento e evita registrar novamente uma conversa já processada.
+
+Uma falha de rede após iniciar `POST /api/cliente`, `PATCH /api/cliente/{idCliente}`, `POST /api/evento` ou `POST /api/evento/{idEvento}/acao` é considerada ambígua. A operação não é repetida automaticamente, evitando duplicação ou sobreposição incerta. O resultado deve ser conciliado no CRM usando o identificador da conversa.

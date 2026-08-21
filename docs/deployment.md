@@ -1,45 +1,101 @@
-# Guia de Deploy e Produção
+# Deploy e operação
 
-Orientações para colocar o serviço em produção.
+Este guia reúne os requisitos para executar a API em produção. A relação completa de variáveis e seus valores padrão está em [.env.example](../.env.example).
 
-## 1. Deploy via Docker (Recomendado)
+## Preparação
 
-O projeto possui um `Dockerfile` multi-stage baseado no Node.js 20. A integração usa somente HTTP e não instala navegador ou dependências gráficas.
+Crie o arquivo de ambiente e defina um Bearer exclusivo para os sistemas consumidores:
+
+```bash
+cp .env.example .env
+openssl rand -hex 32
+```
+
+Configure o valor gerado em `API_TOKEN` e use `NODE_ENV=production`. Em produção, a aplicação recusa tokens com menos de 32 caracteres e não publica o Swagger.
+
+O processamento síncrono direto é o padrão e não exige chave de criptografia:
+
+```env
+NODE_ENV=production
+API_TOKEN=<token-gerado>
+QUEUE_ENABLED=false
+```
+
+Para habilitar a fila, gere uma chave AES de 32 bytes:
+
+```bash
+openssl rand -base64 32
+```
+
+```env
+QUEUE_ENABLED=true
+QUEUE_DRIVER=file
+CREDENTIAL_ENCRYPTION_KEY=<chave-gerada>
+```
+
+A aplicação valida essa chave sempre que a fila está habilitada, independentemente do ambiente.
+
+## Docker Compose
 
 ```bash
 docker compose up --build -d
 ```
 
-O Compose usa um volume nomeado para `data/queue.json`, evitando depender das permissões de uma pasta do host. O conteúdo persiste entre recriações do container enquanto o volume não for removido. Jobs pendentes contêm dados pessoais em claro e exigem volume e backups criptografados; jobs terminais têm o payload removido.
+A imagem usa Node.js 20, executa como usuário sem privilégios e inclui um healthcheck em `GET /health`. O Compose publica a porta somente em `127.0.0.1:3000` e mantém 45 segundos de tolerância para o encerramento gracioso.
 
-## 2. Variáveis de Ambiente Críticas
+## Configuração operacional
 
-- `NODE_ENV=production`
-- `API_TOKEN`: token Bearer compartilhado somente com os sistemas consumidores autorizados.
-- `CREDENTIAL_ENCRYPTION_KEY`: chave de 32 bytes em Base64 usada para proteger o login do Syonet na fila. Gere com `openssl rand -base64 32`.
-- `SYONET_HTTP_TIMEOUT_MS=15000`: limite de cada chamada ao CRM.
-- `SYNC_TIMEOUT_MS=60000`: após esse período, a chamada síncrona responde `504` com o `jobId`, sem cancelar o job já aceito.
-- `SHUTDOWN_TIMEOUT_MS=30000`: tempo para concluir jobs ativos antes de encerrar o processo.
-- `QUEUE_ENABLED=true`: chave operacional da fila. Com `false`, não inicializa o driver configurado nem o worker e `POST /leads` responde `503` sem criar job.
-- `QUEUE_RETRY_BASE_DELAY_MS=1000`: base do atraso exponencial para falhas seguramente repetíveis.
-- `QUEUE_MAX_JOBS=1000`: limite absoluto de jobs mantidos. Ao atingir o limite, jobs terminais antigos são removidos primeiro; se todos ainda estiverem ativos, novos leads recebem `503`.
-- `QUEUE_DRIVER=file` para persistência local ou `memory` para execução efêmera.
-- Mesmo com `QUEUE_ENABLED=true`, `POST /leads` responde `503` sem criar job quando não existe worker ativo, inclusive no modo assíncrono.
-- `JOB_RETENTION_DAYS=7`: remove jobs concluídos ou falhos e seus dados pessoais após a retenção.
-- `LOG_LEVEL=info`: nível dos logs estruturados enviados para stdout.
+| Variável                         |     Padrão | Finalidade                                                         |
+| -------------------------------- | ---------: | ------------------------------------------------------------------ |
+| `QUEUE_ENABLED`                  |    `false` | Habilita a fila e o processamento em segundo plano.                |
+| `QUEUE_DRIVER`                   |     `file` | Escolhe persistência local (`file`) ou memória efêmera (`memory`). |
+| `QUEUE_CONCURRENCY`              |        `1` | Limita jobs processados simultaneamente; aceita de 1 a 10.         |
+| `QUEUE_MAX_JOBS`                 |     `1000` | Aplica contrapressão quando não há espaço seguro para outro job.   |
+| `QUEUE_RETRY_BASE_DELAY_MS`      |     `1000` | Define a base do atraso exponencial entre tentativas seguras.      |
+| `DEDUP_WINDOW_MINUTES`           |        `5` | Define a janela da deduplicação por telefone.                      |
+| `JOB_RETENTION_DAYS`             |        `7` | Retém resultados terminais e fingerprints de deduplicação.         |
+| `SYONET_HTTP_TIMEOUT_MS`         |    `15000` | Limita cada chamada ao Syonet.                                     |
+| `SYONET_HTTP_MAX_RESPONSE_BYTES` |  `2097152` | Limita cada resposta JSON do Syonet a 2 MiB.                       |
+| `SYONET_PROCESS_TIMEOUT_MS`      |    `60000` | Limita o processamento completo de um lead.                        |
+| `SYNC_TIMEOUT_MS`                |    `60000` | Limita a espera síncrona por um job sem cancelá-lo.                |
+| `SHUTDOWN_TIMEOUT_MS`            |    `30000` | Limita a espera por requisições e jobs ativos no encerramento.     |
+| `RATE_LIMIT_MAX`                 |      `100` | Limita requisições por janela.                                     |
+| `RATE_LIMIT_TIME_WINDOW`         | `1 minute` | Define a janela do limite de tráfego.                              |
+| `LOG_LEVEL`                      |     `info` | Define o nível mínimo dos logs estruturados.                       |
 
-Use um grace period do orquestrador maior que `SHUTDOWN_TIMEOUT_MS`. O Compose fornece 45 segundos para o padrão de 30 segundos. Ao receber `SIGTERM`, o serviço deixa de aceitar novas conexões, fecha as ociosas, para de retirar jobs e preserva requisições e jobs ativos até o limite. Ao final do prazo, as conexões restantes são encerradas. Jobs pendentes ficam no driver `file` para o próximo start; pendências no driver `memory` são explicitamente reportadas e serão perdidas.
+`QUEUE_FILE_PATH`, `PORT` e `HOST` normalmente não precisam ser alterados no Compose. Consulte `.env.example` quando o deploy não usar essa configuração.
 
-### Recuperação de uma fila inválida
+## Topologia e rede
 
-O driver `file` interrompe a inicialização se `data/queue.json` estiver vazio, malformado ou inconsistente. Isso é intencional: substituir a fila automaticamente poderia apagar leads sem aviso. Preserve uma cópia do volume, valide o JSON e restaure a última versão íntegra do backup. Se não houver backup, a decisão de remover ou reconstruir o arquivo exige conciliação dos jobs com o Syonet; não apague o volume como tentativa automática de recuperação.
+Execute exatamente uma réplica desta versão. Os bloqueios de conversa e enfileiramento são locais ao processo, e o driver `file` não aceita escritores concorrentes. Escalabilidade horizontal exige fila compartilhada com reserva atômica e bloqueio distribuído.
 
-O Compose publica a porta apenas em `127.0.0.1`. Exponha o serviço por um proxy HTTPS ou pela rede interna do orquestrador. O Swagger não é registrado quando `NODE_ENV=production`.
+Publique a API por um proxy HTTPS ou por uma rede interna protegida. Como o consumidor escolhe dinamicamente o host do Syonet, aplique também uma política de saída que bloqueie loopback, redes privadas, endereços link-local e endpoints de metadados da infraestrutura. A validação da URL pela aplicação não elimina o risco de DNS rebinding.
 
-### Rotação da chave de criptografia
+## Persistência da fila
 
-`CREDENTIAL_ENCRYPTION_KEY` também deriva, com separação de domínio, a chave usada nos fingerprints de deduplicação. Antes de rotacioná-la, pause novos envios, deixe a fila persistida sem jobs pendentes e preserve o inventário de jobs recentes. Após a troca, fingerprints antigos não reconhecem novos retries; concilie identificadores ainda dentro da janela de deduplicação para evitar uma gravação repetida. A rotação do login do Syonet é independente e não altera esses fingerprints.
+Com `QUEUE_DRIVER=file`, o Compose mantém `data/queue.json` em um volume nomeado. Jobs pendentes guardam dados pessoais em texto claro e credenciais cifradas; proteja o volume e seus backups com criptografia e controle de acesso. Jobs terminais não mantêm o payload nem o envelope de credenciais.
 
-## 3. Logs
+O arquivo recebe permissão `0600`. No host, aplique a mesma permissão ao `.env` e a qualquer arquivo que contenha sessão ou segredo.
 
-Os logs JSON são enviados para stdout. A plataforma de containers deve aplicar coleta, acesso e retenção. Credenciais, Authorization e envelopes criptografados são redigidos pelo logger.
+### Recuperação
+
+O driver interrompe a inicialização se o arquivo estiver vazio, malformado ou inconsistente. Não substitua nem apague o volume automaticamente: preserve uma cópia, valide o JSON e restaure o último backup íntegro. Sem backup, reconcilie os jobs com o Syonet antes de reconstruir a fila.
+
+Jobs encontrados como `processing` após um reinício são marcados como falha ambígua e não voltam à fila automaticamente.
+
+### Rotação da chave
+
+`CREDENTIAL_ENCRYPTION_KEY` cifra as credenciais e deriva, com separação de domínio, a chave dos fingerprints de deduplicação. Antes de rotacioná-la:
+
+1. interrompa novos envios;
+2. aguarde até não haver jobs pendentes ou ativos;
+3. preserve o inventário dos jobs ainda retidos;
+4. substitua a chave e reinicie a aplicação.
+
+Após a troca, fingerprints antigos não reconhecem novos reenvios. Concilie identificadores que ainda estejam dentro da janela de retenção.
+
+## Encerramento e observabilidade
+
+Configure no orquestrador um período de encerramento superior a `SHUTDOWN_TIMEOUT_MS`. Jobs pendentes sobrevivem no driver `file`; no driver `memory`, são perdidos quando o processo termina.
+
+Os logs são emitidos como JSON em stdout. A plataforma deve fornecer coleta, retenção, alertas e controle de acesso. Credenciais, Bearer e envelopes criptografados são redigidos pelo logger.

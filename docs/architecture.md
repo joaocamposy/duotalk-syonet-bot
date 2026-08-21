@@ -1,55 +1,103 @@
-# Arquitetura e Ciclo de Vida da Requisição
+# Arquitetura
 
-Este documento descreve a arquitetura interna do sistema de integração entre Duotalk e Syonet CRM.
+Este documento descreve o fluxo interno da integração Duotalk → Syonet. Para enviar requisições, consulte o [guia de uso](usage.md); para configurar o ambiente, consulte o [guia de deploy](deployment.md).
 
-## Visão Geral do Ciclo de Vida
+## Entrada da API
 
-1. **Recepção (Fastify Controller)**:
-   - A requisição `POST /leads` é recebida.
-   - O payload é validado via **Zod** (`leadRequestSchema`). Se houver erro de campos obrigatórios, retorna `400 Bad Request`.
-2. **Enfileiramento (Queue Manager)**:
-   - O payload validado é passado ao `queueInstance`.
-   - `QUEUE_ENABLED=false` funciona como circuit breaker: usa um driver inerte, não inicia worker e rejeita a requisição com `503` sem criar job.
-   - Com a fila habilitada, `QUEUE_DRIVER` registra o job em memória (`memory`) ou persiste no arquivo `data/queue.json` (`file`).
-   - A API responde imediatamente `202 Accepted` com o `jobId`.
-3. **Processamento Assíncrono (Worker & HTTP)**:
-   - O worker processa os jobs respeitando a concorrência (`QUEUE_CONCURRENCY`).
-   - Depois da verificação do toggle, se nenhum worker estiver ativo, a API também rejeita chamadas síncronas e assíncronas com `503`, sem criar um job.
-   - Se uma chamada `?sync=true` ultrapassar `SYNC_TIMEOUT_MS`, responde `504` com o `jobId`; o job aceito continua ativo e deve ser consultado antes de um reenvio.
-   - O Bearer autentica o sistema consumidor do microsserviço.
-   - A URL HTTPS e as credenciais do tenant são recebidas em cada requisição.
-   - O login do Syonet recebido no corpo é criptografado antes de entrar na fila.
-   - `target.companyId`, fornecido pelo consumidor fora de `data`, precisa coincidir com a empresa ativa da sessão antes de qualquer pesquisa ou escrita.
-   - O worker descriptografa o envelope somente em memória durante o processamento.
-   - O `phoneParser` extrai o DDI (55), DDD e Número do telefone.
-   - A integração autentica por HTTP, reutiliza os cookies em memória e chama as APIs de cliente e evento do Syonet.
-   - De/para funcionais são resolvidos antes da primeira escrita; mapeamentos desconhecidos falham com código estável e sem retry.
-   - Respostas do Syonet são validadas antes de serem usadas e todas as chamadas possuem timeout.
-4. **Resiliência pós-crash**:
-   - Jobs que ainda estavam `pending` voltam a ficar disponíveis ao worker.
-   - Jobs encontrados em `processing` são encerrados como falha ambígua para conciliação, pois uma escrita no CRM pode ter sido confirmada antes da queda.
-   - O envelope de credenciais e o payload pessoal do lead são removidos assim que o job chega a `completed` ou `failed`.
-   - Durante um shutdown gracioso, o worker para de retirar jobs e aguarda somente os que já estavam ativos; jobs pendentes permanecem na fila persistida.
+`POST /leads` passa por quatro etapas antes do processamento:
 
-## Proteção, Limitação e Desduplicação (Dedup & Rate Limit)
+1. limitação de requisições;
+2. leitura e validação estrutural do corpo e da query pelo Fastify;
+3. validação do Bearer do consumidor;
+4. validação e normalização do contrato pelo Zod.
 
-- 🛑 **Rate Limit (@fastify/rate-limit)**:
-  - Protege a API contra inundação de requisições maliciosas ou loops do consumidor.
-  - Configurável no `.env` via `RATE_LIMIT_MAX` (padrão: 100) e `RATE_LIMIT_TIME_WINDOW` (padrão: 1 minute).
-  - Retorna `HTTP 429 Too Many Requests` quando excedido.
-  - Todas as requisições com o Bearer válido compartilham um limite; tentativas inválidas compartilham o limite do endereço visto pelo Fastify. Atrás do proxy recomendado, isso forma um único bucket de tráfego não autenticado no proxy. Variações de caixa, espaços ou tokens inválidos não criam buckets ilimitados, e o token nunca é registrado.
+O contrato separa responsabilidades:
 
-- 🔄 **Desduplicação Inteligente (Dedup)**:
-  - Evita re-enfileirar requisições repetidas disparadas em curto intervalo (ex: retries do consumidor ou cliques duplos).
-  - Isola a chave por origem, `companyId` e modo `dry-run`/gravação usando um hash; a URL não é persistida em texto claro na chave.
-  - Dentro do tenant, identifica duplicatas por domínios separados de `idConversa`, `id` do lead ou número de telefone e pelo estado normalizado de nome, email e telefone. Assim, uma repetição idêntica é descartada, enquanto dados de contato alterados podem gerar uma atualização. Um HMAC com a chave do deploy impede que esses valores sejam persistidos em texto claro ou enumerados diretamente a partir da chave.
-  - `idConversa` ou `id` permanecem deduplicados durante `JOB_RETENTION_DAYS`; o fallback por telefone usa `DEDUP_WINDOW_MINUTES`.
-  - Uma duplicata concluída retorna `200`; se ainda estiver pendente ou em processamento, retorna `202`. Ambos reutilizam o `jobId` existente sem processar o lead novamente.
-  - Jobs falhos por unidade ou de/para podem ser reenviados depois da correção; outras falhas duplicadas retornam `409`.
-  - Não existe bypass público da deduplicação.
-  - A proteção da fila não impede atualizações legítimas do contato. Durante o processamento, uma segunda camada consulta o Syonet por cliente, empresa e tipo de evento e reutiliza a oportunidade cuja observação contém a mesma `idConversa`. A execução também é serializada em memória por destino, unidade e conversa para impedir duas criações simultâneas dentro da mesma instância.
-  - `QUEUE_MAX_JOBS` limita crescimento de memória/disco. Jobs terminais mais antigos podem sair antes da retenção temporal para abrir espaço; se não houver job terminal removível, a API aplica backpressure com `503`.
+- `credentials` identifica e autentica o tenant Syonet;
+- `target.companyId` declara a unidade esperada;
+- `dryRun` controla a execução;
+- `data` contém somente os dados do lead.
 
-## Segurança de retries
+## Modos de processamento
 
-Falhas transitórias anteriores a uma escrita usam atraso exponencial. Se a conexão falhar depois que um `POST` ou `PATCH` ao Syonet foi iniciado, o job é marcado como falho para conciliação e não é repetido automaticamente, pois o CRM pode ter confirmado a operação sem a resposta chegar ao serviço.
+### Síncrono direto
+
+É o fluxo padrão quando `QUEUE_ENABLED=false`. A própria requisição executa a integração e retorna o resultado final. As credenciais permanecem somente em memória, e nenhum job é criado.
+
+Uma chamada com `?sync=false` é recusada com `503`, pois não existe processamento em segundo plano sem fila.
+
+### Fila opcional
+
+Com `QUEUE_ENABLED=true`, toda requisição cria ou reutiliza um job. O driver pode ser:
+
+- `memory`: estado efêmero, perdido no encerramento do processo;
+- `file`: estado persistido em `data/queue.json`.
+
+O processador da fila respeita `QUEUE_CONCURRENCY`. Com `?sync=false`, a API retorna `202` assim que o job é aceito. Sem o parâmetro, aguarda o resultado até `SYNC_TIMEOUT_MS`; depois desse prazo, retorna `504` com o `jobId`, mas não cancela o processamento.
+
+A API não aceita novos jobs quando a fila está sem processador ou sem capacidade.
+
+## Processamento no Syonet
+
+O fluxo comum aos dois modos:
+
+1. autentica no Syonet e valida a sessão;
+2. confirma que a empresa ativa corresponde a `target.companyId`;
+3. pesquisa o cliente pelo telefone e exige correspondência exata;
+4. abre e compara o cadastro quando o cliente já existe;
+5. resolve forma de contato, tipo de evento e mídia;
+6. cria ou atualiza o cliente, se necessário;
+7. reutiliza a oportunidade da mesma `idConversa`;
+8. opcionalmente, reutiliza uma oportunidade aberta compatível conforme `daysToUpdateOpenEvent` e adiciona a observação como comentário;
+9. cria uma nova oportunidade quando nenhuma das regras anteriores encontra correspondência.
+
+Todas as respostas do Syonet têm limite de tamanho e validação de contrato. Cada chamada possui limite de tempo próprio, e o processamento completo possui um prazo total. Os detalhes das rotas e da autenticação estão em [Integração com o Syonet](integrations/syonet.md).
+
+## Idempotência
+
+A proteção ocorre em duas camadas.
+
+### Na fila
+
+A chave combina ambiente Syonet, unidade, modo (`dryRun` ou gravação), identidade do lead e estado normalizado do contato. Os valores identificáveis são protegidos por HMAC antes da persistência.
+
+- Para `idConversa` ou `id`, a proteção acompanha a retenção do job.
+- O telefone é usado como alternativa em homologações sem identificador, respeitando `DEDUP_WINDOW_MINUTES`; gravações exigem `idConversa`.
+- Dados de contato alterados produzem outra chave, permitindo atualizações legítimas.
+- Jobs falhos por autenticação, unidade ou de/para podem ser reenviados depois da correção.
+- Outras falhas repetidas retornam `409` até a conciliação.
+
+### No Syonet
+
+A observação da oportunidade recebe um marcador técnico derivado de `idConversa`. Antes de criar um evento, a integração pesquisa as oportunidades do cliente e da empresa sem restringir o tipo atual.
+
+Se encontrar exatamente um marcador correspondente, reutiliza o evento. Se encontrar mais de um, ou se a pesquisa atingir o limite sem comprovar a ausência, encerra o processamento com `SYONET_DATA_CONFLICT`.
+
+Quando `daysToUpdateOpenEvent` é maior que zero, uma segunda regra procura a oportunidade aberta mais recente do mesmo cliente, empresa, grupo e tipo cuja criação esteja dentro da janela. A integração registra a observação como comentário; o marcador da conversa nesse comentário impede repetições posteriores.
+
+Um bloqueio local serializa a mesma conversa ou, quando a política de dias está ativa, o mesmo telefone dentro da instância, reduzindo corridas entre requisições simultâneas.
+
+## Falhas e tentativas
+
+Falhas transitórias anteriores a uma escrita podem ser repetidas com atraso exponencial. Depois que um `POST` ou `PATCH` é iniciado, falha de rede, limite de tempo, redirecionamento ou resposta inválida tornam o resultado ambíguo; a operação não é repetida automaticamente.
+
+No driver `file`, um job encontrado como `processing` após reinício também é encerrado como ambíguo. Essa decisão evita repetir uma escrita que o CRM pode ter confirmado antes da interrupção.
+
+Jobs terminais deixam de armazenar credenciais e dados pessoais. Permanecem apenas status, identificadores técnicos, código de erro e resultado sanitizado durante o período de retenção.
+
+## Encerramento
+
+Ao receber `SIGTERM` ou `SIGINT`, a aplicação:
+
+1. deixa de retirar novos jobs;
+2. para de aceitar novas conexões;
+3. aguarda requisições e jobs ativos até `SHUTDOWN_TIMEOUT_MS`;
+4. encerra as conexões restantes ao fim do prazo.
+
+Jobs pendentes sobrevivem apenas no driver `file`.
+
+## Limites atuais
+
+Os bloqueios, o cache de sessões e a coordenação da fila pertencem ao processo. A versão atual suporta uma única instância ativa. Escalabilidade horizontal exige fila compartilhada com reserva atômica e bloqueio distribuído por tenant, unidade e conversa.
+
+Todas as requisições com Bearer válido também compartilham o mesmo limite de tráfego. Esse modelo pressupõe um único sistema consumidor confiável; múltiplos consumidores independentes exigem autenticação e cotas isoladas.

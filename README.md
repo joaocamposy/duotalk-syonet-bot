@@ -1,119 +1,74 @@
-# Duotalk -> Syonet CRM Integration Bot 🤖
+# Integração Duotalk → Syonet CRM
 
-API em **Fastify + TypeScript + Zod** que recebe leads do **Duotalk** e usa as rotas HTTP do **Syonet CRM** para pesquisar clientes, cadastrar contatos e registrar oportunidades.
+API em Fastify, TypeScript e Zod para receber leads do Duotalk, localizar ou atualizar clientes no Syonet CRM e registrar oportunidades.
 
----
+## Visão geral
 
-## ⚡ Recursos Principais
+- Processa requisições de forma síncrona por padrão; a fila é opcional.
+- Recebe URL, credenciais e unidade do Syonet em cada chamada.
+- Pesquisa o cliente pelo telefone e atualiza somente os dados divergentes.
+- Usa `idConversa` como identidade da oportunidade para evitar duplicações.
+- Pode reutilizar uma oportunidade aberta por uma janela configurada em cada requisição.
+- Valida os de/para antes da primeira escrita no CRM.
+- Oferece `dryRun` para validar autenticação, unidade, pesquisa e mapeamentos sem gravar.
 
-- 📞 **Tratamento de Telefone**: Extração automática do DDI (`55`), separação de DDD e número (com e sem hífen).
-- 🔄 **Busca Prévia Inteligente**:
-  - **Cenário A (Contato Inexistente)**: Preenche e cadastra novo contato.
-  - **Cenário B (Contato Existente)**: Abre o cadastro e atualiza somente nome, email informado ou telefone celular que estejam desatualizados.
-- 🎯 **Oportunidade por conversa**: Registra o evento no CRM e reutiliza a oportunidade existente quando a mesma `idConversa` é reenviada.
-- ⚡ **Modos de Execução**: Suporte a processamento **Assíncrono via Fila** (padrão 202 Accepted) e **Síncrono sob demanda** (`?sync=true`).
-- 🔄 **Desduplicação em duas camadas**: Ignora requisições idênticas na fila, aceita dados de contato atualizados e impede que isso duplique a oportunidade da mesma conversa no Syonet.
-- 🛑 **Rate Limit**: Proteção contra inundações via `@fastify/rate-limit` configurável no `.env`.
-- 📦 **Sistema de Filas Pluggable**: Suporte explícito aos drivers `memory` e `file`, sem fallback silencioso para tecnologias não implementadas.
-- 🔐 **Login HTTP criptografado**: Reproduz o fluxo RSA-OAEP e renova a sessão somente ao repetir leituras seguras.
-- 🗝️ **Credenciais protegidas**: Recebe o login do Syonet por HTTPS e o criptografa antes de persistir o job.
-- 🌐 **Tenant dinâmico**: Recebe URL e credenciais do Syonet em cada requisição.
-- 🏬 **Unidade explícita**: Valida `target.companyId` contra a empresa ativa da sessão antes de qualquer operação no CRM.
-- 🧭 **De/para isolado e seguro**: Regras provisórias ficam em um único arquivo e valores desconhecidos interrompem o job antes de qualquer escrita.
-- 🧾 **Logs estruturados**: Saída JSON em stdout com redação automática de credenciais.
-- 🐳 **Docker Ready**: Imagem multi-stage enxuta baseada em Node.js 20 e `docker-compose.yml`.
-- 📚 **Swagger Interativo**: Documentação viva acessível em `/docs` somente fora de produção.
+## Execução local
 
----
-
-## 🚀 Como Executar
-
-### 1. Requisitos
-
-- Node.js >= 20
-- npm ou docker
-
-### 2. Configuração do `.env`
-
-Copie o arquivo de exemplo e preencha as variáveis de ambiente:
+Requisitos: Node.js 20 ou superior e npm.
 
 ```bash
 cp .env.example .env
-```
-
-Configure o token dos consumidores e uma chave independente para criptografar a fila:
-
-```env
-API_TOKEN=gere-um-token-aleatorio-forte
-CREDENTIAL_ENCRYPTION_KEY=gere-com-openssl-rand-base64-32
-```
-
-O sistema consumidor usa o token no header:
-
-```http
-Authorization: Bearer <API_TOKEN>
-```
-
-URL, usuário e senha do Syonet são enviados no objeto `credentials`. Antes do job ser persistido, esses valores são protegidos com AES-256-GCM e removidos do payload do lead.
-
-Até a validação funcional, os de/para ficam centralizados em `src/integrations/syonet/mapping-config.ts`. Alterações de forma de contato, tipo de oportunidade ou mídia não exigem mudanças no fluxo HTTP nem na fila.
-
-### 3. Instalação de Dependências
-
-```bash
 npm ci
-```
-
-### 4. Execução em Desenvolvimento
-
-```bash
 npm run dev
 ```
 
-Acesse a documentação Swagger em: `http://localhost:3000/docs`
+Defina no `.env` um token para autorizar os consumidores:
 
-### 5. Execução via Docker
+```env
+API_TOKEN=gere-um-token-aleatorio-forte
+QUEUE_ENABLED=false
+```
+
+Em produção, `API_TOKEN` deve ter pelo menos 32 caracteres. Com a fila habilitada, gere também a chave de criptografia:
+
+```bash
+openssl rand -base64 32
+```
+
+A interface Swagger fica disponível em `http://localhost:3000/docs` fora de produção. O contrato JSON pode ser obtido em `http://localhost:3000/docs/json`.
+
+## Docker
 
 ```bash
 docker compose up --build
 ```
 
----
+Consulte o [guia de deploy](docs/deployment.md) antes de publicar a API. Ele contém os requisitos de rede, persistência, segredos e topologia suportada.
 
-## 🧪 Testes & Qualidade
+## Qualidade
 
 ```bash
-# Rodar suíte de testes unitários com Vitest
-npm test
-
-# Rodar testes com relatório e limites mínimos de cobertura
-npm run test:coverage
-
-# Enviar um payload completo para o microsserviço local
-# O JSON deve conter credentials, target e data; use dryRun=true para validar
-# unidade, pesquisa e de/para sem executar POST ou PATCH no Syonet.
-npm run test:lead < payload.local.json
-
-# Somente para a gravação real controlada, após conferir o dry-run:
-ALLOW_WRITE_TEST=true npm run test:lead < payload.local.json
-
-# Verificar regras do ESLint
 npm run lint
-
-# Formatar código com Prettier
-npm run format
+npm run format:check
+npm run build
+npm test
+npm run test:coverage
 ```
 
-`test:lead` carrega o `.env` automaticamente e bloqueia payloads sem `data.dryRun=true`. A variável de liberação vale somente para o comando local de teste; ela não altera a proteção do endpoint.
+Para enviar um payload local com proteção contra escrita acidental:
 
----
+```bash
+npm run test:lead < payload.local.json
+```
 
-## 📑 Documentação Detalhada (`docs/`)
+O comando aceita `dryRun: true` por padrão. Uma gravação deliberada exige `dryRun: false` no payload e a liberação explícita `ALLOW_WRITE_TEST=true` naquela execução.
 
-- 📐 [Arquitetura & Filas](docs/architecture.md)
-- 📩 [Requisição de lead](docs/lead-request.md)
-- 🤝 [Guia para sistemas consumidores](docs/consumer-integration.md)
-- 🔌 [Integração HTTP com o Syonet](docs/integrations/syonet.md)
-- 🚀 [Guia de Deploy & Docker](docs/deployment.md)
-- 📝 [Histórico de mudanças](CHANGELOG.md)
-- 🤖 [Guia de Governança AGENTS.md](AGENTS.md)
+## Documentação
+
+- [Uso da API](docs/usage.md): autenticação, envio, modos de processamento e tratamento de respostas.
+- [OpenAPI](docs/openapi.json): contrato oficial de campos, formatos e exemplos.
+- [Deploy](docs/deployment.md): configuração e operação em produção.
+- [Arquitetura](docs/architecture.md): fluxo interno, fila, idempotência e falhas.
+- [Integração com o Syonet](docs/integrations/syonet.md): autenticação e chamadas ao CRM.
+- [Histórico de mudanças](CHANGELOG.md).
+- [Guia de manutenção](AGENTS.md).
