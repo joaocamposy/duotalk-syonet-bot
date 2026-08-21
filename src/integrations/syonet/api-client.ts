@@ -18,8 +18,15 @@ import {
   SyonetMedia,
 } from './mapping.js';
 import { sanitizeSensitiveText } from '../../utils/sensitive-text.js';
-import { SYONET_COMPANY_ACCESS_DENIED } from './errors.js';
+import {
+  SYONET_COMPANY_ACCESS_DENIED,
+  SYONET_CONTRACT_INVALID,
+  SYONET_DATA_CONFLICT,
+  SYONET_WRITE_REJECTED,
+  SYONET_WRITE_REQUIRES_RECONCILIATION,
+} from './errors.js';
 import { applySyonetTimeZone, SYONET_TIME_ZONE } from './time-zone.js';
+import { readSyonetJson } from './response-json.js';
 
 applySyonetTimeZone();
 
@@ -46,9 +53,24 @@ interface SyonetClient {
 }
 
 interface SyonetEvent {
+  dataEvento?: number | string | null;
+  dataInc?: number | string | null;
+  encaminhamentoAtivo?: { idEmpresa?: number } | null;
+  idEmpresa?: number;
+  idEmpresaAtual?: number;
   idEvento?: number;
+  idGrupoEvento?: string;
+  idStatusEvento?: string;
+  idTipoEvento?: string;
   id?: number;
   observacao?: string | null;
+  status?: string;
+}
+
+interface SyonetAction {
+  conclusao?: string | null;
+  idAcao?: number | string;
+  id?: number | string;
 }
 
 interface SyonetEventResponse {
@@ -79,12 +101,33 @@ const syonetEventResponseSchema: z.ZodType<SyonetEventResponse> = z.object({
 });
 const syonetEventSchema: z.ZodType<SyonetEvent> = z
   .object({
+    dataEvento: z.union([z.number(), z.string()]).nullable().optional(),
+    dataInc: z.union([z.number(), z.string()]).nullable().optional(),
+    encaminhamentoAtivo: z.object({ idEmpresa: numericIdSchema.optional() }).nullable().optional(),
+    idEmpresa: numericIdSchema.optional(),
+    idEmpresaAtual: numericIdSchema.optional(),
     idEvento: numericIdSchema.optional(),
+    idGrupoEvento: z.string().optional(),
+    idStatusEvento: z.string().optional(),
+    idTipoEvento: z.string().optional(),
     id: numericIdSchema.optional(),
     observacao: z.string().nullable().optional(),
+    status: z.string().optional(),
   })
   .passthrough();
 const syonetEventsSchema = z.array(syonetEventSchema);
+const syonetActionSchema: z.ZodType<SyonetAction> = z
+  .object({
+    conclusao: z.string().nullable().optional(),
+    idAcao: z.union([numericIdSchema, z.string().min(1)]).optional(),
+    id: z.union([numericIdSchema, z.string().min(1)]).optional(),
+  })
+  .passthrough();
+const syonetActionsSchema = z.array(syonetActionSchema);
+const syonetActionResponseSchema = syonetActionSchema.refine(
+  (action) => action.idAcao !== undefined || action.id !== undefined,
+  'A ação criada não possui identificador',
+);
 const syonetContactFormsSchema: z.ZodType<SyonetContactForm[]> = z.array(
   z.object({
     descricao: z.string().optional(),
@@ -116,6 +159,9 @@ const SESSION_CACHE_TTL_MS = 30 * 60 * 1_000;
 const SESSION_CACHE_MAX_ENTRIES = 500;
 const MAX_OBSERVATION_LENGTH = 8_000;
 const MAX_EVENT_SEARCH_RESULTS = 200;
+const OPEN_EVENT_STATUSES = new Set(['ANDAMENTO', 'AGUARDANDO', 'PENDENTE']);
+const OBSERVATION_HEADER = 'Lead recebido via Duotalk';
+const CONVERSATION_MARKER_PREFIX = 'Duotalk-Conversation-SHA256:';
 const conversationLocks = new Map<string, Promise<void>>();
 
 async function withConversationLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -174,8 +220,19 @@ function parseConfirmedWrite<T>(schema: z.ZodType<T>, value: unknown, operation:
   if (!parsed.success) {
     throw new NonRetryableJobError(
       `O Syonet confirmou ${operation}, mas retornou um contrato inválido; exige conciliação`,
-      { cause: parsed.error },
+      { cause: parsed.error, code: SYONET_WRITE_REQUIRES_RECONCILIATION },
     );
+  }
+  return parsed.data;
+}
+
+function parseSyonetRead<T>(schema: z.ZodType<T>, value: unknown, operation: string): T {
+  const parsed = schema.safeParse(value);
+  if (!parsed.success) {
+    throw new NonRetryableJobError(`O Syonet retornou um contrato inválido ao ${operation}`, {
+      cause: parsed.error,
+      code: SYONET_CONTRACT_INVALID,
+    });
   }
   return parsed.data;
 }
@@ -232,17 +289,24 @@ function selectExistingClient(
   const matches = clients.filter((client) => collectClientPhones(client).has(targetPhone));
   if (matches.length === 1) return matches[0];
   if (matches.length > 1) {
-    throw new NonRetryableJobError('Mais de um cliente possui exatamente o telefone informado');
+    throw new NonRetryableJobError('Mais de um cliente possui exatamente o telefone informado', {
+      code: SYONET_DATA_CONFLICT,
+    });
   }
   throw new NonRetryableJobError(
     'O Syonet retornou clientes na pesquisa, mas nenhum possui exatamente o telefone informado',
+    { code: SYONET_DATA_CONFLICT },
   );
 }
 
 function buildObservation(lead: DuotalkLeadData): string {
+  const conversationMarker = lead.idConversa
+    ? `${CONVERSATION_MARKER_PREFIX} ${createHash('sha256').update(lead.idConversa).digest('hex')}`
+    : null;
   const observation = sanitizeSensitiveText(
     [
-      'Lead recebido via Duotalk',
+      OBSERVATION_HEADER,
+      conversationMarker,
       lead.idConversa ? `ID conversa: ${lead.idConversa}` : null,
       lead.id ? `ID lead: ${lead.id}` : null,
       lead.canal ? `Canal: ${lead.canal}` : null,
@@ -266,26 +330,34 @@ function hasConversationMarker(
   idConversa: string,
 ): boolean {
   if (!observation) return false;
-  const expected = `ID conversa: ${idConversa}`;
-  return observation.split(/\r?\n/).some((line) => line.trim() === expected);
+  const lines = observation.split(/\r?\n/).map((line) => line.trim());
+  if (lines[0] !== OBSERVATION_HEADER) return false;
+
+  const expectedHash = createHash('sha256').update(idConversa).digest('hex');
+  if (lines[1] === `${CONVERSATION_MARKER_PREFIX} ${expectedHash}`) return true;
+
+  // Compatibilidade somente com o cabeçalho legado criado por esta integração.
+  return lines[1] === `ID conversa: ${idConversa}`;
 }
 
 async function findEventByConversation(
   api: SyonetGateway,
   clientId: number,
   companyId: number,
-  eventTypeId: string,
   idConversa: string,
 ): Promise<number | null> {
   const searchParams = new URLSearchParams({
     idCliente: String(clientId),
     idEmpresa: String(companyId),
-    idTipoEvento: eventTypeId,
     maxRegistros: String(MAX_EVENT_SEARCH_RESULTS),
     ordenacao: 'DATAEVENTO',
+    dataFutura: 'true',
+    pagina: '0',
   });
-  const events = syonetEventsSchema.parse(
+  const events = parseSyonetRead(
+    syonetEventsSchema,
     await api.get<unknown>(`/api/evento?${searchParams.toString()}`),
+    'pesquisar oportunidades',
   );
   const matches: number[] = [];
 
@@ -294,7 +366,11 @@ async function findEventByConversation(
     if (eventId === null) continue;
     const eventWithObservation =
       event.observacao === undefined
-        ? syonetEventSchema.parse(await api.get<unknown>(`/api/evento/${eventId}`))
+        ? parseSyonetRead(
+            syonetEventSchema,
+            await api.get<unknown>(`/api/evento/${eventId}`),
+            'abrir uma oportunidade',
+          )
         : event;
     if (hasConversationMarker(eventWithObservation.observacao, idConversa)) {
       matches.push(eventId);
@@ -304,9 +380,137 @@ async function findEventByConversation(
   if (matches.length > 1) {
     throw new NonRetryableJobError(
       'Mais de uma oportunidade do Syonet possui o mesmo identificador de conversa; exige conciliação',
+      { code: SYONET_DATA_CONFLICT },
+    );
+  }
+  if (matches.length === 0 && events.length >= MAX_EVENT_SEARCH_RESULTS) {
+    throw new NonRetryableJobError(
+      'A pesquisa de oportunidades atingiu o limite sem localizar a conversa; exige conciliação para evitar duplicação',
+      { code: SYONET_DATA_CONFLICT },
     );
   }
   return matches[0] ?? null;
+}
+
+function parseSyonetTimestamp(value: number | string | null | undefined): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const numericValue = Number(value);
+  if (Number.isFinite(numericValue)) return numericValue;
+  const parsedDate = Date.parse(value);
+  return Number.isFinite(parsedDate) ? parsedDate : null;
+}
+
+function getEventCompanyId(event: SyonetEvent): number | null {
+  return event.idEmpresaAtual ?? event.encaminhamentoAtivo?.idEmpresa ?? event.idEmpresa ?? null;
+}
+
+function getEventStatus(event: SyonetEvent): string | null {
+  return event.idStatusEvento ?? event.status ?? null;
+}
+
+function hasOpenEventPolicyFields(event: SyonetEvent): boolean {
+  return Boolean(
+    getEventStatus(event) &&
+    event.idGrupoEvento &&
+    event.idTipoEvento &&
+    getEventCompanyId(event) !== null &&
+    parseSyonetTimestamp(event.dataEvento ?? event.dataInc) !== null,
+  );
+}
+
+async function findOpenEventToUpdate(
+  api: SyonetGateway,
+  clientId: number,
+  companyId: number,
+  groupId: string,
+  typeId: string,
+  daysToUpdateOpenEvent: number,
+): Promise<number | null> {
+  if (daysToUpdateOpenEvent <= 0) return null;
+
+  const searchParams = new URLSearchParams({
+    idCliente: String(clientId),
+    idEmpresa: String(companyId),
+    idGrupoEvento: groupId,
+    idTipoEvento: typeId,
+    maxRegistros: String(MAX_EVENT_SEARCH_RESULTS),
+    ordenacao: 'DATAEVENTO',
+    dataFutura: 'true',
+    pagina: '0',
+  });
+  for (const status of OPEN_EVENT_STATUSES) searchParams.append('status', status);
+
+  const events = parseSyonetRead(
+    syonetEventsSchema,
+    await api.get<unknown>(`/api/evento?${searchParams.toString()}`),
+    'pesquisar oportunidades abertas',
+  );
+  const cutoff = Date.now() - daysToUpdateOpenEvent * 24 * 60 * 60 * 1_000;
+  const candidates: Array<{ eventId: number; timestamp: number }> = [];
+
+  for (const summary of events) {
+    const eventId = getNumericId(summary);
+    if (eventId === null) continue;
+    const event = hasOpenEventPolicyFields(summary)
+      ? summary
+      : parseSyonetRead(
+          syonetEventSchema,
+          await api.get<unknown>(`/api/evento/${eventId}`),
+          'abrir uma oportunidade candidata',
+        );
+    const timestamp = parseSyonetTimestamp(event.dataEvento ?? event.dataInc);
+    if (
+      timestamp !== null &&
+      timestamp >= cutoff &&
+      getEventCompanyId(event) === companyId &&
+      event.idGrupoEvento === groupId &&
+      event.idTipoEvento === typeId &&
+      OPEN_EVENT_STATUSES.has(getEventStatus(event) ?? '')
+    ) {
+      candidates.push({ eventId, timestamp });
+    }
+  }
+
+  if (candidates.length === 0 && events.length >= MAX_EVENT_SEARCH_RESULTS) {
+    throw new NonRetryableJobError(
+      'A pesquisa de oportunidades abertas atingiu o limite sem comprovar a ausência de um evento elegível',
+      { code: SYONET_DATA_CONFLICT },
+    );
+  }
+  candidates.sort(
+    (left, right) => right.timestamp - left.timestamp || right.eventId - left.eventId,
+  );
+  return candidates[0]?.eventId ?? null;
+}
+
+async function eventAlreadyHasConversationComment(
+  api: SyonetGateway,
+  eventId: number,
+  idConversa: string,
+): Promise<boolean> {
+  const actions = parseSyonetRead(
+    syonetActionsSchema,
+    await api.get<unknown>(`/api/evento/${eventId}/acao`),
+    'consultar os comentários da oportunidade',
+  );
+  return actions.some((action) => hasConversationMarker(action.conclusao, idConversa));
+}
+
+async function addLeadCommentToEvent(
+  api: SyonetGateway,
+  eventId: number,
+  lead: DuotalkLeadData,
+): Promise<void> {
+  parseConfirmedWrite(
+    syonetActionResponseSchema,
+    await api.post<unknown>(`/api/evento/${eventId}/acao`, {
+      tipo: 'COMENTARIO',
+      resultado: 'PENDENTE',
+      conclusao: buildObservation(lead),
+    }),
+    'a inclusão do comentário na oportunidade',
+  );
 }
 
 function getNextActionTimestamp(): number {
@@ -370,6 +574,7 @@ export class HttpSyonetGateway implements SyonetGateway {
     private readonly url: string,
     private readonly user: string,
     private readonly pass: string,
+    private readonly processSignal?: AbortSignal,
   ) {
     const validatedCredentials = syonetCredentialsSchema.safeParse({
       url,
@@ -407,7 +612,12 @@ export class HttpSyonetGateway implements SyonetGateway {
   }
 
   private async authenticate(): Promise<void> {
-    this.cookieHeader = await loginAndGetCookiesViaHttp(this.url, this.user, this.pass);
+    this.cookieHeader = await loginAndGetCookiesViaHttp(
+      this.url,
+      this.user,
+      this.pass,
+      this.processSignal,
+    );
     cacheSession(this.cacheKey, this.cookieHeader);
   }
 
@@ -421,7 +631,9 @@ export class HttpSyonetGateway implements SyonetGateway {
       response = await fetch(`${this.baseUrl}${path}`, {
         ...options,
         redirect: 'manual',
-        signal: AbortSignal.timeout(env.SYONET_HTTP_TIMEOUT_MS),
+        signal: this.processSignal
+          ? AbortSignal.any([AbortSignal.timeout(env.SYONET_HTTP_TIMEOUT_MS), this.processSignal])
+          : AbortSignal.timeout(env.SYONET_HTTP_TIMEOUT_MS),
         headers: {
           Accept: 'application/json, text/plain, */*',
           'Custom-Charset-Response': 'UTF-8',
@@ -433,7 +645,7 @@ export class HttpSyonetGateway implements SyonetGateway {
       if (options.method === 'POST' || options.method === 'PATCH') {
         throw new NonRetryableJobError(
           `Falha de rede após iniciar ${options.method} ${path}; resultado no Syonet é ambíguo e exige conciliação`,
-          { cause: error },
+          { cause: error, code: SYONET_WRITE_REQUIRES_RECONCILIATION },
         );
       }
       throw error;
@@ -459,18 +671,23 @@ export class HttpSyonetGateway implements SyonetGateway {
         options.method === 'PATCH' ||
         (response.status >= 300 && response.status < 500)
       ) {
-        throw new NonRetryableJobError(message);
+        throw new NonRetryableJobError(message, {
+          code:
+            response.status >= 300 && response.status < 400
+              ? SYONET_WRITE_REQUIRES_RECONCILIATION
+              : SYONET_WRITE_REJECTED,
+        });
       }
       throw new Error(message);
     }
 
     try {
-      return (await response.json()) as T;
+      return (await readSyonetJson(response)) as T;
     } catch (error: unknown) {
       if (options.method === 'POST' || options.method === 'PATCH') {
         throw new NonRetryableJobError(
           `Syonet confirmou ${options.method} ${path}, mas retornou uma resposta inválida; exige conciliação`,
-          { cause: error },
+          { cause: error, code: SYONET_WRITE_REQUIRES_RECONCILIATION },
         );
       }
       throw error;
@@ -487,10 +704,21 @@ export async function processLeadViaApi(
   credentials: SyonetCredentials,
   target: SyonetTarget,
   gateway?: SyonetGateway,
+  options: { dryRun?: boolean; daysToUpdateOpenEvent?: number } = {},
 ): Promise<LeadProcessResult> {
   const api =
-    gateway ?? new HttpSyonetGateway(credentials.url, credentials.username, credentials.password);
-  const company = syonetCompanySchema.parse(await api.get<unknown>('/api/sessao/empresa'));
+    gateway ??
+    new HttpSyonetGateway(
+      credentials.url,
+      credentials.username,
+      credentials.password,
+      AbortSignal.timeout(env.SYONET_PROCESS_TIMEOUT_MS),
+    );
+  const company = parseSyonetRead(
+    syonetCompanySchema,
+    await api.get<unknown>('/api/sessao/empresa'),
+    'consultar a empresa ativa',
+  );
   if (company.idEmpresa !== target.companyId) {
     throw new NonRetryableJobError(
       `A companyId ${target.companyId} não está disponível na sessão do usuário Syonet; empresa ativa: ${company.idEmpresa}`,
@@ -498,11 +726,19 @@ export async function processLeadViaApi(
     );
   }
 
-  const process = () => processLeadForCompany(lead, company, api);
-  if (!lead.idConversa) return process();
+  const daysToUpdateOpenEvent = options.daysToUpdateOpenEvent ?? 0;
+  const process = () =>
+    processLeadForCompany(lead, company, api, options.dryRun ?? false, daysToUpdateOpenEvent);
+  const lockIdentity =
+    daysToUpdateOpenEvent > 0
+      ? `phone:${parsePhoneNumber(lead.telefone).fullWithoutDdi}`
+      : lead.idConversa
+        ? `conversation:${lead.idConversa}`
+        : null;
+  if (!lockIdentity) return process();
 
   const lockKey = createHash('sha256')
-    .update(JSON.stringify([credentials.url, company.idEmpresa, lead.idConversa]))
+    .update(JSON.stringify([credentials.url, company.idEmpresa, lockIdentity]))
     .digest('hex');
   return withConversationLock(lockKey, process);
 }
@@ -511,6 +747,8 @@ async function processLeadForCompany(
   lead: DuotalkLeadData,
   company: SyonetCompany,
   api: SyonetGateway,
+  dryRun: boolean,
+  daysToUpdateOpenEvent: number,
 ): Promise<LeadProcessResult> {
   const phone = parsePhoneNumber(lead.telefone);
   const searchParams = new URLSearchParams({
@@ -519,8 +757,10 @@ async function processLeadForCompany(
     telefone: phone.fullWithoutDdi,
     timeZoneId: SYONET_TIME_ZONE,
   });
-  const clients = syonetClientsSchema.parse(
+  const clients = parseSyonetRead(
+    syonetClientsSchema,
     await api.get<unknown>(`/api/cliente?${searchParams.toString()}`),
+    'pesquisar clientes',
   );
   const existingClient = selectExistingClient(clients, phone.fullWithoutDdi);
   const existingClientId = existingClient ? getNumericId(existingClient) : null;
@@ -531,7 +771,11 @@ async function processLeadForCompany(
   }
   const detailedExistingClient =
     existingClientId !== null
-      ? syonetClientSchema.parse(await api.get<unknown>(`/api/cliente/${existingClientId}`))
+      ? parseSyonetRead(
+          syonetClientSchema,
+          await api.get<unknown>(`/api/cliente/${existingClientId}`),
+          'abrir o cadastro do cliente',
+        )
       : null;
   if (detailedExistingClient && getNumericId(detailedExistingClient) !== existingClientId) {
     throw new NonRetryableJobError(
@@ -542,27 +786,40 @@ async function processLeadForCompany(
     ? buildClientUpdatePayload(detailedExistingClient, lead)
     : {};
 
-  const user = syonetUserSchema.parse(await api.get<unknown>('/api/sessao/usuario'));
-  const contactForms = syonetContactFormsSchema.parse(
+  const user = parseSyonetRead(
+    syonetUserSchema,
+    await api.get<unknown>('/api/sessao/usuario'),
+    'consultar o usuário da sessão',
+  );
+  const contactForms = parseSyonetRead(
+    syonetContactFormsSchema,
     await api.get<unknown>(`/api/empresa/${company.idEmpresa}/formacontato`),
+    'consultar as formas de contato',
   );
   const contactForm = selectContactForm(contactForms, lead);
-  const eventTypes = syonetEventTypesSchema.parse(
+  const eventTypes = parseSyonetRead(
+    syonetEventTypesSchema,
     await api.get<unknown>(
       `/api/usuario/${user.idUsuario}/tipoevento?idEmpresa=${company.idEmpresa}`,
     ),
+    'consultar os tipos de evento',
   );
   const eventType = selectEventType(eventTypes, lead);
   const groupId = eventType.idGrupoEvento;
   const typeId = eventType.idTipoEvento;
   if (!groupId || !typeId) {
-    throw new Error('O tipo de evento selecionado não possui grupo ou identificador');
+    throw new NonRetryableJobError(
+      'O tipo de evento selecionado não possui grupo ou identificador',
+      { code: SYONET_CONTRACT_INVALID },
+    );
   }
 
-  const media = syonetMediaSchema.parse(
+  const media = parseSyonetRead(
+    syonetMediaSchema,
     await api.get<unknown>(
       `/api/empresa/${company.idEmpresa}/grupoevento/${encodeURIComponent(groupId)}/tipoevento/${encodeURIComponent(typeId)}/midia`,
     ),
+    'consultar as mídias do evento',
   );
   const selectedMedia = selectMedia(media, lead);
   const mapping = {
@@ -572,7 +829,7 @@ async function processLeadForCompany(
     media: selectedMedia,
   };
 
-  if (lead.dryRun) {
+  if (dryRun) {
     return {
       clientCreated: false,
       clientUpdated: false,
@@ -627,7 +884,7 @@ async function processLeadForCompany(
 
   const existingEventId =
     !clientCreated && lead.idConversa
-      ? await findEventByConversation(api, clientId, company.idEmpresa, typeId, lead.idConversa)
+      ? await findEventByConversation(api, clientId, company.idEmpresa, lead.idConversa)
       : null;
   if (existingEventId !== null) {
     logger.info(
@@ -642,6 +899,47 @@ async function processLeadForCompany(
       dryRun: false,
       eventCreated: false,
       eventId: existingEventId,
+      mapping,
+    };
+  }
+
+  const openEventId =
+    !clientCreated && daysToUpdateOpenEvent > 0
+      ? await findOpenEventToUpdate(
+          api,
+          clientId,
+          company.idEmpresa,
+          groupId,
+          typeId,
+          daysToUpdateOpenEvent,
+        )
+      : null;
+  if (openEventId !== null) {
+    const commentAlreadyExists = lead.idConversa
+      ? await eventAlreadyHasConversationComment(api, openEventId, lead.idConversa)
+      : false;
+    if (!commentAlreadyExists) {
+      try {
+        await addLeadCommentToEvent(api, openEventId, lead);
+      } catch (error: unknown) {
+        throw new NonRetryableJobError(
+          'A inclusão do comentário na oportunidade aberta não foi confirmada; exige conciliação no Syonet',
+          { cause: error, code: SYONET_WRITE_REQUIRES_RECONCILIATION },
+        );
+      }
+    }
+    logger.info(
+      { clientId, eventId: openEventId, commentAdded: !commentAlreadyExists },
+      'Oportunidade aberta reutilizada pela política de dias',
+    );
+    return {
+      clientCreated,
+      clientUpdated,
+      clientId,
+      companyId: company.idEmpresa,
+      dryRun: false,
+      eventCreated: false,
+      eventId: openEventId,
       mapping,
     };
   }
@@ -665,10 +963,10 @@ async function processLeadForCompany(
       'a criação do evento',
     );
   } catch (error: unknown) {
-    if (clientCreated && !(error instanceof NonRetryableJobError)) {
+    if (clientCreated || clientUpdated) {
       throw new NonRetryableJobError(
-        'Cliente criado, mas a criação da oportunidade não foi confirmada; exige conciliação no Syonet',
-        { cause: error },
+        'Cliente criado ou atualizado, mas a criação da oportunidade não foi confirmada; exige conciliação no Syonet',
+        { cause: error, code: SYONET_WRITE_REQUIRES_RECONCILIATION },
       );
     }
     throw error;

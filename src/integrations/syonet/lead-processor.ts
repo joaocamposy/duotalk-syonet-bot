@@ -33,7 +33,10 @@ export async function processLeadJob(job: LeadJob): Promise<LeadProcessResult> {
       cause: error,
     });
   }
-  const result = await processLeadViaApi(job.data, credentials, job.target);
+  const result = await processLeadViaApi(job.data, credentials, job.target, undefined, {
+    dryRun: job.dryRun ?? false,
+    daysToUpdateOpenEvent: job.daysToUpdateOpenEvent ?? 0,
+  });
   logger.info({ jobId: job.id, ...result }, 'Fluxo HTTP do Syonet concluído com sucesso');
   return result;
 }

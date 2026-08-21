@@ -7,6 +7,7 @@ describe('sync timeout response', () => {
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
+    process.env.QUEUE_ENABLED = 'true';
     process.env.QUEUE_DRIVER = 'memory';
     process.env.API_TOKEN = 'sync-timeout-route-token';
     process.env.CREDENTIAL_ENCRYPTION_KEY = randomBytes(32).toString('base64');

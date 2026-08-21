@@ -58,6 +58,9 @@ function isStoredLeadJob(value: unknown): value is LeadJob {
     isValidDate(job.createdAt) &&
     isValidDate(job.updatedAt) &&
     (job.target === undefined || syonetTargetSchema.safeParse(job.target).success) &&
+    (job.dryRun === undefined || typeof job.dryRun === 'boolean') &&
+    (job.daysToUpdateOpenEvent === undefined ||
+      (Number.isInteger(job.daysToUpdateOpenEvent) && job.daysToUpdateOpenEvent >= 0)) &&
     (job.dedupKey === undefined || typeof job.dedupKey === 'string') &&
     (job.errorCode === undefined || typeof job.errorCode === 'string') &&
     (!needsCredentials || isEncryptedCredentialEnvelope(job.credentialEnvelope))
@@ -100,6 +103,7 @@ export class FileQueueDriver implements QueueDriver {
     }
 
     try {
+      fs.chmodSync(this.filePath, 0o600);
       const content = fs.readFileSync(this.filePath, 'utf-8');
       if (!content.trim()) {
         throw new Error('Arquivo da fila está vazio');
@@ -116,6 +120,11 @@ export class FileQueueDriver implements QueueDriver {
       let recoveredState = false;
       for (const job of rawJobs) {
         if (job.data) {
+          const legacyData = job.data as DuotalkLeadData & { dryRun?: unknown };
+          if (job.dryRun === undefined) {
+            job.dryRun = legacyData.dryRun === true;
+            recoveredState = true;
+          }
           const normalizedData = duotalkLeadDataSchema.parse(job.data);
           if (JSON.stringify(normalizedData) !== JSON.stringify(job.data)) recoveredState = true;
           job.data = normalizedData;
@@ -213,6 +222,8 @@ export class FileQueueDriver implements QueueDriver {
     credentialEnvelope: EncryptedCredentialEnvelope,
     target: SyonetTarget,
     dedupKey?: string,
+    dryRun = false,
+    daysToUpdateOpenEvent = 0,
   ): Promise<LeadJob> {
     const previousJobs = new Map(this.jobs);
     this.purgeExpiredJobs();
@@ -222,6 +233,8 @@ export class FileQueueDriver implements QueueDriver {
     const job: LeadJob = {
       id,
       data,
+      dryRun,
+      daysToUpdateOpenEvent,
       target,
       credentialEnvelope,
       dedupKey,

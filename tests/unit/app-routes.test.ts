@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
 describe('HTTP routes', () => {
@@ -12,31 +12,37 @@ describe('HTTP routes', () => {
       password: 'senha-nao-expor',
     },
     target: { companyId: 25 },
+    dryRun: true,
     data: {
       idConversa: 'route-test-conversation',
       nome: 'Teste das rotas',
       telefone: '5561999998888',
-      dryRun: true,
     },
   };
 
-  beforeAll(async () => {
+  beforeEach(async () => {
+    vi.resetModules();
     process.env.NODE_ENV = 'test';
+    process.env.QUEUE_ENABLED = 'true';
     process.env.QUEUE_DRIVER = 'memory';
     process.env.QUEUE_MAX_JOBS = '7';
     process.env.API_TOKEN = 'route-test-token';
     process.env.CREDENTIAL_ENCRYPTION_KEY = randomBytes(32).toString('base64');
-    const { buildApp } = await import('../../src/app.js');
+    const [{ buildApp }, { queueInstance }] = await Promise.all([
+      import('../../src/app.js'),
+      import('../../src/queue/queue-manager.js'),
+    ]);
     app = buildApp({ startWorker: false });
+    queueInstance.process(() => new Promise(() => undefined));
     await app.ready();
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await app.close();
   });
 
   it('protege endpoint de leads e endpoints da fila com Bearer', async () => {
-    const leadRequest = await app.inject({ method: 'POST', url: '/leads', payload });
+    const leadRequest = await app.inject({ method: 'POST', url: '/leads?sync=false', payload });
     const queue = await app.inject({ method: 'GET', url: '/queue/status' });
 
     expect(leadRequest.statusCode).toBe(401);
@@ -68,6 +74,7 @@ describe('HTTP routes', () => {
     const specification = app.swagger();
 
     expect(JSON.stringify(specification)).not.toContain('Default Response');
+    expect(specification.info.title).toBe('API de Integração Duotalk–Syonet');
     expect(specification).toMatchObject({
       servers: [
         {
@@ -78,22 +85,66 @@ describe('HTTP routes', () => {
       paths: {
         '/leads': {
           post: {
+            description: expect.stringContaining('POST /leads?sync=false'),
+            parameters: [],
             responses: {
               200: { description: 'Lead processado; resultado disponível' },
-              202: { description: 'Lead aceito para processamento em background' },
+              202: { description: 'Lead aceito para processamento em segundo plano' },
               400: { description: 'Payload ou requisição inválida' },
               401: { description: 'Token de acesso ausente ou inválido' },
               503: {
                 description:
-                  'Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado',
+                  'Modo assíncrono indisponível, processador ausente ou fila temporariamente sem capacidade',
               },
               504: {
                 description:
                   'Prazo síncrono esgotado; job não cancelado e ainda pendente ou em processamento',
               },
             },
+            requestBody: {
+              content: {
+                'application/json': {
+                  example: { dryRun: true },
+                },
+              },
+            },
           },
         },
+      },
+    });
+  });
+
+  it('mantém o exemplo do OpenAPI pronto para envio no contrato atual', async () => {
+    const specification = app.swagger();
+    const operation = specification.paths?.['/leads']?.post;
+    const requestBody = operation?.requestBody;
+    if (!requestBody || '$ref' in requestBody) throw new Error('Exemplo de POST /leads ausente');
+    const example = requestBody.content['application/json']?.example;
+    const { leadRequestSchema } = await import('../../src/types/lead-request.js');
+    const parsedExample = leadRequestSchema.parse(example);
+    const testHash = parsedExample.data.nome.match(/^Teste Duotalk ([a-f0-9]{6})$/)?.[1];
+
+    expect(testHash).toBeDefined();
+    expect(parsedExample.data.id).toBe(`lead-${testHash}`);
+    expect(parsedExample.data.idConversa).toBe(`conversa-${testHash}`);
+    expect(parsedExample.data.email).toBe(`teste.duotalk.${testHash}@example.com`);
+    expect(example).toMatchObject({
+      dryRun: true,
+      daysToUpdateOpenEvent: 30,
+      credentials: {
+        url: 'https://seu-tenant.syonet.com',
+        username: 'usuario-tecnico',
+        password: 'senha',
+      },
+      target: { companyId: 25 },
+      data: {
+        id: `lead-${testHash}`,
+        idConversa: `conversa-${testHash}`,
+        nome: `Teste Duotalk ${testHash}`,
+        telefone: expect.any(String),
+        mensagem: expect.any(String),
+        messageHistory: expect.any(String),
+        url_duotalk: expect.any(String),
       },
     });
   });
@@ -105,7 +156,7 @@ describe('HTTP routes', () => {
     };
     const response = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization: 'Bearer route-test-token' },
       payload: invalidPayload,
     });
@@ -118,7 +169,7 @@ describe('HTTP routes', () => {
   it('responde 400 para JSON malformado em vez de erro interno', async () => {
     const response = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: {
         authorization: 'Bearer route-test-token',
         'content-type': 'application/json',
@@ -130,10 +181,12 @@ describe('HTTP routes', () => {
     expect(response.json()).toEqual({ success: false, message: 'Requisição HTTP inválida' });
   });
 
-  it('recusa também o modo assíncrono quando não existe worker ativo', async () => {
+  it('recusa também o modo assíncrono quando não existe processador ativo', async () => {
+    const { queueInstance } = await import('../../src/queue/queue-manager.js');
+    queueInstance.pause();
     const response = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization: 'Bearer route-test-token' },
       payload,
     });
@@ -141,7 +194,7 @@ describe('HTTP routes', () => {
     expect(response.statusCode).toBe(503);
     expect(response.json()).toEqual({
       success: false,
-      message: 'Processamento indisponível: nenhum worker ativo registrado',
+      message: 'Processamento indisponível: nenhum processador de fila ativo',
     });
     expect(response.json()).not.toHaveProperty('jobId');
   });
@@ -152,7 +205,7 @@ describe('HTTP routes', () => {
     const authorization = 'Bearer route-test-token';
     const accepted = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization },
       payload,
     });
@@ -176,29 +229,44 @@ describe('HTTP routes', () => {
   });
 
   it('retorna o job anterior quando a conversa é duplicada', async () => {
+    const first = await app.inject({
+      method: 'POST',
+      url: '/leads?sync=false',
+      headers: { authorization: 'Bearer route-test-token' },
+      payload,
+    });
     const duplicate = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization: 'Bearer route-test-token' },
       payload,
     });
 
+    expect(first.statusCode).toBe(202);
     expect(duplicate.statusCode).toBe(202);
+    expect(duplicate.json().jobId).toBe(first.json().jobId);
     expect(duplicate.json()).toMatchObject({ duplicate: true });
     expect(['pending', 'processing']).toContain(duplicate.json().status);
   });
 
   it('não confunde dry-run com a gravação real da mesma conversa', async () => {
+    const dryRun = await app.inject({
+      method: 'POST',
+      url: '/leads?sync=false',
+      headers: { authorization: 'Bearer route-test-token' },
+      payload,
+    });
     const response = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
-        data: { ...payload.data, dryRun: false },
+        dryRun: false,
       },
     });
 
+    expect(dryRun.statusCode).toBe(202);
     expect(response.statusCode).toBe(202);
     expect(response.json()).not.toMatchObject({ duplicate: true });
   });
@@ -246,7 +314,7 @@ describe('HTTP routes', () => {
     const request = (data: Record<string, unknown>) =>
       app.inject({
         method: 'POST',
-        url: '/leads',
+        url: '/leads?sync=false',
         headers: { authorization: 'Bearer route-test-token' },
         payload: { ...payload, data: { ...payload.data, idConversa: undefined, ...data } },
       });
@@ -260,9 +328,15 @@ describe('HTTP routes', () => {
   });
 
   it('não confunde a mesma conversa entre tenants Syonet diferentes', async () => {
+    const baseTenant = await app.inject({
+      method: 'POST',
+      url: '/leads?sync=false',
+      headers: { authorization: 'Bearer route-test-token' },
+      payload,
+    });
     const otherTenant = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
@@ -270,14 +344,21 @@ describe('HTTP routes', () => {
       },
     });
 
+    expect(baseTenant.statusCode).toBe(202);
     expect(otherTenant.statusCode).toBe(202);
     expect(otherTenant.json()).not.toMatchObject({ duplicate: true });
   });
 
   it('não confunde a mesma conversa entre unidades diferentes do mesmo Syonet', async () => {
+    const baseCompany = await app.inject({
+      method: 'POST',
+      url: '/leads?sync=false',
+      headers: { authorization: 'Bearer route-test-token' },
+      payload,
+    });
     const otherCompany = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
@@ -285,6 +366,7 @@ describe('HTTP routes', () => {
       },
     });
 
+    expect(baseCompany.statusCode).toBe(202);
     expect(otherCompany.statusCode).toBe(202);
     expect(otherCompany.json()).not.toMatchObject({ duplicate: true });
   });
@@ -297,7 +379,7 @@ describe('HTTP routes', () => {
     const request = () =>
       app.inject({
         method: 'POST',
-        url: '/leads',
+        url: '/leads?sync=false',
         headers: { authorization: 'Bearer route-test-token' },
         payload: concurrentPayload,
       });
@@ -308,9 +390,21 @@ describe('HTTP routes', () => {
   });
 
   it('responde 503 quando a fila não pode aceitar outro job com segurança', async () => {
+    for (let index = 0; index < 7; index++) {
+      const accepted = await app.inject({
+        method: 'POST',
+        url: '/leads?sync=false',
+        headers: { authorization: 'Bearer route-test-token' },
+        payload: {
+          ...payload,
+          data: { ...payload.data, idConversa: `queue-capacity-existing-${index}` },
+        },
+      });
+      expect(accepted.statusCode).toBe(202);
+    }
     const response = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization: 'Bearer route-test-token' },
       payload: {
         ...payload,
@@ -329,7 +423,7 @@ describe('HTTP routes', () => {
     const authorization = 'Bearer route-test-token';
     const existing = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization },
       payload,
     });
@@ -343,13 +437,20 @@ describe('HTTP routes', () => {
       clientId: 10,
       companyId: 25,
       dryRun: true,
+      eventCreated: false,
       eventId: null,
+      mapping: {
+        contactForm: 'WHATSAPP',
+        eventGroupId: 'OPORTUNIDADE',
+        eventTypeId: 'NOVOS WEB',
+        media: 'DUOTALK',
+      },
     };
     job.updatedAt = new Date().toISOString();
 
     const duplicate = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization },
       payload,
     });
@@ -367,7 +468,7 @@ describe('HTTP routes', () => {
     const authorization = 'Bearer route-test-token';
     const existing = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization },
       payload,
     });
@@ -380,7 +481,7 @@ describe('HTTP routes', () => {
 
     const duplicate = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization },
       payload,
     });
@@ -394,7 +495,7 @@ describe('HTTP routes', () => {
     const companyPayload = { ...payload, target: { companyId: 26 } };
     const existing = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization },
       payload: companyPayload,
     });
@@ -407,7 +508,7 @@ describe('HTTP routes', () => {
 
     const corrected = await app.inject({
       method: 'POST',
-      url: '/leads',
+      url: '/leads?sync=false',
       headers: { authorization },
       payload: companyPayload,
     });

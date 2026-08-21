@@ -1,11 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 
 describe('rate limit response', () => {
   let app: FastifyInstance;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
+    vi.resetModules();
     process.env.NODE_ENV = 'test';
     process.env.QUEUE_DRIVER = 'memory';
     process.env.API_TOKEN = 'rate-limit-route-token';
@@ -15,7 +16,7 @@ describe('rate limit response', () => {
     await app.ready();
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await app.close();
   });
 
@@ -48,7 +49,7 @@ describe('rate limit response', () => {
         headers: { authorization, 'x-forwarded-for': forwardedFor },
       });
 
-    expect((await request('bearer   rate-limit-route-token', '203.0.113.10')).statusCode).toBe(429);
+    expect((await request('bearer   rate-limit-route-token', '203.0.113.10')).statusCode).toBe(200);
     expect((await request('Bearer token-invalido-a', '203.0.113.20')).statusCode).toBe(401);
     expect((await request('Bearer token-invalido-b', '203.0.113.20')).statusCode).toBe(429);
   });

@@ -7,9 +7,9 @@ export function assertSafeTestLeadPayload(payload: unknown, allowWrite: boolean)
     throw new Error('O payload de teste deve conter o objeto data');
   }
 
-  if (payload.data.dryRun !== true && !allowWrite) {
+  if (payload.dryRun !== true && !allowWrite) {
     throw new Error(
-      'Teste bloqueado: informe data.dryRun=true ou libere uma gravação controlada com ALLOW_WRITE_TEST=true',
+      'Teste bloqueado: informe dryRun=true na raiz ou libere uma gravação controlada com ALLOW_WRITE_TEST=true',
     );
   }
 }

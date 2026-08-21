@@ -66,7 +66,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.register(swagger, {
     openapi: {
       info: {
-        title: 'Duotalk Syonet Bot API',
+        title: 'API de Integração Duotalk–Syonet',
         description: 'API de integração de leads do Duotalk com o Syonet CRM via HTTP',
         version: '1.0.0',
       },
@@ -76,7 +76,7 @@ export function buildApp(options: BuildAppOptions = {}) {
           variables: {
             baseUrl: {
               default: 'http://localhost:3000',
-              description: 'Endereço base do microsserviço',
+              description: 'Endereço base da API',
             },
           },
         },
@@ -86,10 +86,56 @@ export function buildApp(options: BuildAppOptions = {}) {
           consumerToken: {
             type: 'http',
             scheme: 'bearer',
-            description: 'Token que autoriza o sistema consumidor a usar o microsserviço',
+            description: 'Token que autoriza o sistema consumidor a usar a API',
           },
         },
       },
+    },
+    transformObject: (document) => {
+      if (!('openapiObject' in document)) return document.swaggerObject;
+      const { openapiObject } = document;
+      const leadOperation = openapiObject.paths?.['/leads']?.post;
+      const parameters = leadOperation?.parameters;
+      if (parameters) {
+        leadOperation.parameters = parameters.filter(
+          (parameter) => '$ref' in parameter || parameter.name !== 'sync',
+        );
+      }
+      const requestBody = leadOperation?.requestBody;
+      if (requestBody && !('$ref' in requestBody)) {
+        const jsonContent = requestBody.content['application/json'];
+        if (jsonContent) {
+          const testHash = 'a1b2c3';
+          jsonContent.example = {
+            credentials: {
+              url: 'https://seu-tenant.syonet.com',
+              username: 'usuario-tecnico',
+              password: 'senha',
+            },
+            target: { companyId: 25 },
+            dryRun: true,
+            daysToUpdateOpenEvent: 30,
+            data: {
+              id: `lead-${testHash}`,
+              idConversa: `conversa-${testHash}`,
+              origem: 'Outbound',
+              canal: 'WhatsApp 360',
+              qualificacaoLead: 'Lead',
+              intermediario: 'Duotalk',
+              operador: 'Operador Exemplo',
+              nome: `Teste Duotalk ${testHash}`,
+              telefone: '5561999998888',
+              email: `teste.duotalk.${testHash}@example.com`,
+              mensagem: 'Mensagem: Conversa criada manualmente',
+              firstMessage: 'Olá, gostaria de conhecer os veículos disponíveis.',
+              messageHistory: `(20/08/2026, 10:00:00) Teste Duotalk ${testHash}: Olá, gostaria de conhecer os veículos disponíveis.`,
+              url_duotalk: `https://app.duotalk.io/apps/inbox/start-conversation?name=Teste%20Duotalk%20${testHash}&phone=5561999998888`,
+              intencao: 'DVNU - Veículos Novos',
+            },
+          };
+        }
+      }
+      return openapiObject;
     },
   });
 
@@ -160,7 +206,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     });
   });
 
-  // Conectar o worker da fila à integração HTTP do Syonet
+  // Conectar o processador da fila à integração HTTP do Syonet
   if (env.QUEUE_ENABLED && options.startWorker !== false) {
     queueInstance.process(async (job) => processLeadJob(job));
   }

@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { assertSafeTestLeadPayload } from './test-lead-safety.js';
 
-const serviceUrl = process.env.MICROSERVICE_URL ?? 'http://127.0.0.1:3000';
+const serviceUrl = process.env.API_URL ?? 'http://127.0.0.1:3000';
 const serviceToken = process.env.API_TOKEN;
-const requestTimeoutMs = Number(process.env.MICROSERVICE_REQUEST_TIMEOUT_MS ?? 75_000);
+const requestTimeoutMs = Number(process.env.API_REQUEST_TIMEOUT_MS ?? 75_000);
 const allowWrite = process.env.ALLOW_WRITE_TEST === 'true';
 
 if (!serviceToken) {
@@ -11,7 +11,7 @@ if (!serviceToken) {
 }
 
 if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
-  throw new Error('MICROSERVICE_REQUEST_TIMEOUT_MS deve ser um número positivo');
+  throw new Error('API_REQUEST_TIMEOUT_MS deve ser um número positivo');
 }
 
 if (process.stdin.isTTY) {
@@ -26,7 +26,7 @@ for await (const chunk of process.stdin) {
 const parsedRequest: unknown = JSON.parse(requestBody);
 assertSafeTestLeadPayload(parsedRequest, allowWrite);
 
-const response = await fetch(`${serviceUrl.replace(/\/$/, '')}/leads?sync=true`, {
+const response = await fetch(`${serviceUrl.replace(/\/$/, '')}/leads`, {
   method: 'POST',
   headers: {
     Authorization: `Bearer ${serviceToken}`,

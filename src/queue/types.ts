@@ -12,7 +12,7 @@ export interface LeadJobResult {
   dryRun: boolean;
   eventCreated: boolean;
   eventId: number | null;
-  mapping?: {
+  mapping: {
     contactForm: string;
     eventGroupId: string;
     eventTypeId: string;
@@ -23,6 +23,8 @@ export interface LeadJobResult {
 export interface LeadJob {
   id: string;
   data?: DuotalkLeadData;
+  dryRun?: boolean;
+  daysToUpdateOpenEvent?: number;
   target?: SyonetTarget;
   credentialEnvelope?: EncryptedCredentialEnvelope;
   dedupKey?: string;
@@ -54,6 +56,8 @@ export interface QueueDriver {
     credentialEnvelope: EncryptedCredentialEnvelope,
     target: SyonetTarget,
     dedupKey?: string,
+    dryRun?: boolean,
+    daysToUpdateOpenEvent?: number,
   ): Promise<LeadJob>;
   getJob(id: string): Promise<LeadJob | null>;
   findDuplicate(dedupKey: string, windowMinutes?: number): Promise<LeadJob | null>;

@@ -3,11 +3,11 @@ import { assertSafeTestLeadPayload } from '../../scripts/test-lead-safety.js';
 
 describe('test lead script safety', () => {
   it('permite dry-run sem liberação adicional', () => {
-    expect(() => assertSafeTestLeadPayload({ data: { dryRun: true } }, false)).not.toThrow();
+    expect(() => assertSafeTestLeadPayload({ dryRun: true, data: {} }, false)).not.toThrow();
   });
 
   it('bloqueia gravação acidental', () => {
-    expect(() => assertSafeTestLeadPayload({ data: { dryRun: false } }, false)).toThrow(
+    expect(() => assertSafeTestLeadPayload({ dryRun: false, data: {} }, false)).toThrow(
       'Teste bloqueado',
     );
     expect(() => assertSafeTestLeadPayload({ data: {} }, false)).toThrow('Teste bloqueado');

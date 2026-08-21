@@ -8,14 +8,14 @@ const envSchema = z
     PORT: z.coerce.number().int().min(0).max(65_535).default(3000),
     HOST: z.string().default('0.0.0.0'),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
-    // Autenticação do microsserviço e criptografia da fila
+    // Autorização da API e criptografia da fila
     API_TOKEN: z.string().trim().default(''),
     CREDENTIAL_ENCRYPTION_KEY: z.string().trim().default(''),
 
     // Fila & Dedup
     QUEUE_ENABLED: z
       .enum(['true', 'false'])
-      .default('true')
+      .default('false')
       .transform((value) => value === 'true'),
     QUEUE_DRIVER: z.enum(['memory', 'file']).default('file'),
     QUEUE_FILE_PATH: z.string().trim().min(1).default('./data/queue.json'),
@@ -27,6 +27,12 @@ const envSchema = z
     SYNC_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
     SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
     SYONET_HTTP_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+    SYONET_HTTP_MAX_RESPONSE_BYTES: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(2 * 1024 * 1024),
+    SYONET_PROCESS_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
 
     // Rate Limit
     RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
@@ -44,7 +50,9 @@ const envSchema = z
           message: 'Deve possuir ao menos 32 caracteres em produção',
         });
       }
+    }
 
+    if (config.QUEUE_ENABLED) {
       const encryptionKey = Buffer.from(config.CREDENTIAL_ENCRYPTION_KEY, 'base64');
       if (
         encryptionKey.length !== 32 ||
@@ -53,7 +61,7 @@ const envSchema = z
         context.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['CREDENTIAL_ENCRYPTION_KEY'],
-          message: 'Deve conter exatamente 32 bytes em Base64',
+          message: 'Deve conter exatamente 32 bytes em Base64 quando a fila está habilitada',
         });
       }
     }

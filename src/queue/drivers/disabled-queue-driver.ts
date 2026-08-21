@@ -11,11 +11,15 @@ export class DisabledQueueDriver implements QueueDriver {
     _credentialEnvelope: EncryptedCredentialEnvelope,
     _target: SyonetTarget,
     _dedupKey?: string,
+    _dryRun?: boolean,
+    _daysToUpdateOpenEvent?: number,
   ): Promise<LeadJob> {
     void _data;
     void _credentialEnvelope;
     void _target;
     void _dedupKey;
+    void _dryRun;
+    void _daysToUpdateOpenEvent;
     throw new Error('Fila desativada por configuração');
   }
 

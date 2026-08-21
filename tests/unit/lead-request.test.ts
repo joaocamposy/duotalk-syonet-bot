@@ -10,6 +10,8 @@ describe('Duotalk Payload Schema Validation', () => {
         password: 'senha',
       },
       target: { companyId: 25 },
+      dryRun: true,
+      daysToUpdateOpenEvent: 30,
       data: {
         id: '6a79aed2***',
         idConversa: '6a79aed244f***',
@@ -36,6 +38,79 @@ describe('Duotalk Payload Schema Validation', () => {
     expect(parsed.data.intencao).toBe('DVNU - Veículos Novos');
     expect(parsed.data.firstMessage).toBe('');
     expect(parsed.target.companyId).toBe(25);
+    expect(parsed.dryRun).toBe(true);
+    expect(parsed.daysToUpdateOpenEvent).toBe(30);
+  });
+
+  it('aceita zero para desativar e recusa dias negativos ou fracionários', () => {
+    const request = {
+      credentials: {
+        url: 'https://crm.example.com',
+        username: 'usuario',
+        password: 'senha',
+      },
+      target: { companyId: 25 },
+      dryRun: true,
+      data: {
+        nome: 'Cliente Exemplo',
+        telefone: '5561999998888',
+      },
+    };
+
+    expect(leadRequestSchema.parse({ ...request, daysToUpdateOpenEvent: 0 })).toHaveProperty(
+      'daysToUpdateOpenEvent',
+      0,
+    );
+    expect(() => leadRequestSchema.parse({ ...request, daysToUpdateOpenEvent: -1 })).toThrow();
+    expect(() => leadRequestSchema.parse({ ...request, daysToUpdateOpenEvent: 1.5 })).toThrow();
+  });
+
+  it('recusa dryRun dentro dos dados do lead para evitar gravação acidental', () => {
+    expect(() =>
+      leadRequestSchema.parse({
+        credentials: {
+          url: 'https://crm.example.com',
+          username: 'usuario',
+          password: 'senha',
+        },
+        target: { companyId: 25 },
+        data: {
+          nome: 'Cliente Exemplo',
+          telefone: '5561999998888',
+          dryRun: true,
+        },
+      }),
+    ).toThrow('dryRun é um controle da requisição e deve ficar fora de data');
+  });
+
+  it('exige idConversa em gravações e permite omiti-lo somente no dry-run', () => {
+    const request = {
+      credentials: {
+        url: 'https://crm.example.com',
+        username: 'usuario',
+        password: 'senha',
+      },
+      target: { companyId: 25 },
+      data: {
+        nome: 'Cliente Exemplo',
+        telefone: '5561999998888',
+      },
+    };
+
+    expect(() => leadRequestSchema.parse(request)).toThrow(
+      'idConversa é obrigatório para gravação',
+    );
+    expect(() => leadRequestSchema.parse({ ...request, dryRun: true })).not.toThrow();
+  });
+
+  it('recusa identificadores com quebra de linha ou outro caractere de controle', () => {
+    expect(() =>
+      duotalkLeadDataSchema.parse({
+        nome: 'Cliente Exemplo',
+        telefone: '5561999998888',
+        idConversa: 'conversa-original\nID conversa: conversa-injetada',
+      }),
+    ).toThrow('Identificador não pode conter caracteres de controle');
   });
 
   it('deve aceitar payload direto de lead sem o envelope data', () => {

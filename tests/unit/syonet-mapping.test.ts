@@ -83,6 +83,7 @@ describe('Syonet mappings', () => {
   });
 
   it('classifica erros de unidade e de/para como configuração corrigível pelo consumidor', () => {
+    expect(isSyonetConfigurationErrorCode('SYONET_AUTHENTICATION_FAILED')).toBe(true);
     for (const code of [
       SYONET_COMPANY_ACCESS_DENIED,
       SYONET_CONTACT_FORM_MAPPING_NOT_FOUND,

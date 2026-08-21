@@ -30,6 +30,17 @@ const requestErrorResponseSchema = {
 
 const jobResultSchema = {
   type: 'object',
+  required: [
+    'clientCreated',
+    'clientUpdated',
+    'clientId',
+    'companyId',
+    'dryRun',
+    'eventCreated',
+    'eventId',
+    'mapping',
+  ],
+  additionalProperties: false,
   properties: {
     clientCreated: { type: 'boolean' },
     clientUpdated: { type: 'boolean' },
@@ -76,6 +87,17 @@ const syncTimeoutResponseSchema = {
   },
 };
 
+const directSuccessResponseSchema = {
+  type: 'object',
+  required: ['success', 'message', 'status', 'result'],
+  properties: {
+    success: { type: 'boolean', enum: [true] },
+    message: { type: 'string' },
+    status: { type: 'string', enum: ['completed'] },
+    result: jobResultSchema,
+  },
+};
+
 function describedResponse(description: string, schema: Record<string, unknown>) {
   return { description, ...schema };
 }
@@ -92,7 +114,8 @@ async function requireConsumerAuthorization(
 export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.post('/leads', {
     schema: {
-      description: 'Recebe os dados do lead do Duotalk e enfileira para gravação no Syonet CRM',
+      description:
+        'Recebe os dados do lead do Duotalk e processa sincronamente por padrão. Para o modo assíncrono, habilite a fila e use POST /leads?sync=false',
       tags: ['Leads'],
       security: [{ consumerToken: [] }],
       querystring: {
@@ -102,7 +125,7 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
             type: 'string',
             enum: ['true', 'false'],
             description:
-              'Aguarda o job até SYNC_TIMEOUT_MS quando true; retorna 504 com jobId se o prazo expirar',
+              'Opcional. Quando omitido, processa sincronamente. false exige fila habilitada e responde 202',
           },
         },
       },
@@ -110,6 +133,17 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
         type: 'object',
         required: ['credentials', 'target', 'data'],
         properties: {
+          dryRun: {
+            type: 'boolean',
+            description:
+              'Controle de execução; true valida o fluxo sem executar POST ou PATCH no Syonet',
+          },
+          daysToUpdateOpenEvent: {
+            type: 'integer',
+            minimum: 0,
+            description:
+              'Quando maior que zero, reutiliza a oportunidade aberta mais recente do mesmo cliente, empresa, grupo e tipo dentro desta quantidade de dias e adiciona a nova observação como comentário',
+          },
           credentials: {
             type: 'object',
             required: ['url', 'username', 'password'],
@@ -143,8 +177,20 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
             required: ['nome', 'telefone'],
             additionalProperties: true,
             properties: {
-              id: { type: 'string', maxLength: 200 },
-              idConversa: { type: 'string', maxLength: 200 },
+              id: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 200,
+                pattern: '^[^\\u0000-\\u001F\\u007F-\\u009F]+$',
+              },
+              idConversa: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 200,
+                pattern: '^[^\\u0000-\\u001F\\u007F-\\u009F]+$',
+                description:
+                  'Identidade idempotente da oportunidade; obrigatória quando dryRun não é true',
+              },
               origem: { type: 'string', minLength: 1, maxLength: 100 },
               canal: { type: 'string', minLength: 1, maxLength: 100 },
               qualificacaoLead: { type: 'string', minLength: 1, maxLength: 100 },
@@ -158,18 +204,16 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
               messageHistory: { type: 'string', maxLength: 50000 },
               url_duotalk: { type: 'string', maxLength: 2048 },
               intencao: { type: 'string', maxLength: 200 },
-              dryRun: { type: 'boolean' },
             },
           },
         },
       },
       response: {
-        200: describedResponse(
-          'Lead processado; resultado disponível',
-          jobAcceptanceResponseSchema,
-        ),
+        200: describedResponse('Lead processado; resultado disponível', {
+          anyOf: [jobAcceptanceResponseSchema, directSuccessResponseSchema],
+        }),
         202: describedResponse(
-          'Lead aceito para processamento em background',
+          'Lead aceito para processamento em segundo plano',
           jobAcceptanceResponseSchema,
         ),
         400: describedResponse('Payload ou requisição inválida', requestErrorResponseSchema),
@@ -185,7 +229,7 @@ export async function leadRoutes(fastify: FastifyInstance): Promise<void> {
           requestErrorResponseSchema,
         ),
         503: describedResponse(
-          'Fila desativada, worker ausente ou fila temporariamente sem capacidade; nenhum job criado',
+          'Modo assíncrono indisponível, processador ausente ou fila temporariamente sem capacidade',
           basicErrorResponseSchema,
         ),
         504: describedResponse(

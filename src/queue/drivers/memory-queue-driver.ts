@@ -28,6 +28,8 @@ export class MemoryQueueDriver implements QueueDriver {
     credentialEnvelope: EncryptedCredentialEnvelope,
     target: SyonetTarget,
     dedupKey?: string,
+    dryRun = false,
+    daysToUpdateOpenEvent = 0,
   ): Promise<LeadJob> {
     this.purgeExpiredJobs();
     this.ensureCapacity();
@@ -36,6 +38,8 @@ export class MemoryQueueDriver implements QueueDriver {
     const job: LeadJob = {
       id,
       data,
+      dryRun,
+      daysToUpdateOpenEvent,
       target,
       credentialEnvelope,
       dedupKey,

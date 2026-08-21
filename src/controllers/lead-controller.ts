@@ -11,13 +11,17 @@ import type { DuotalkLeadData } from '../types/lead-request.js';
 import type { SyonetTarget } from '../integrations/syonet/target.js';
 import { isSyonetConfigurationErrorCode } from '../integrations/syonet/errors.js';
 import { parsePhoneNumber } from '../utils/phone-parser.js';
+import { processLeadViaApi } from '../integrations/syonet/api-client.js';
 
 let enqueueLock = Promise.resolve();
+// Domínio histórico mantido como valor opaco para preservar fingerprints persistidos.
+const DEDUP_HMAC_DOMAIN = Buffer.from('ZHVvdGFsay1zeW9uZXQtYm90OmRlZHVwOnYy', 'base64');
 
 export function buildDedupKey(
   leadData: DuotalkLeadData,
   syonetUrl: string,
   target: SyonetTarget,
+  dryRun = false,
 ): string {
   const tenantScope = createHash('sha256')
     .update(`${new URL(syonetUrl).origin}:${target.companyId}`)
@@ -33,12 +37,12 @@ export function buildDedupKey(
     phone: parsePhoneNumber(leadData.telefone).fullWithoutDdi,
   });
   const dedupHmacKey = createHmac('sha256', Buffer.from(env.CREDENTIAL_ENCRYPTION_KEY, 'base64'))
-    .update('duotalk-syonet-bot:dedup:v2')
+    .update(DEDUP_HMAC_DOMAIN)
     .digest();
   const leadFingerprint = createHmac('sha256', dedupHmacKey)
     .update(`${leadScope}:${contactState}`)
     .digest('hex');
-  const executionMode = leadData.dryRun ? 'dry-run' : 'write';
+  const executionMode = dryRun ? 'dry-run' : 'write';
   return `${tenantScope}:${executionMode}:${leadFingerprint}`;
 }
 
@@ -48,6 +52,8 @@ async function enqueueDeduplicated(
   target: SyonetTarget,
   dedupKey: string,
   dedupWindowMinutes: number,
+  dryRun: boolean,
+  daysToUpdateOpenEvent: number,
 ): Promise<{ duplicate: boolean; job: LeadJob }> {
   const previousLock = enqueueLock;
   let releaseLock = (): void => undefined;
@@ -59,7 +65,14 @@ async function enqueueDeduplicated(
   try {
     const duplicate = await queueInstance.findDuplicate(dedupKey, dedupWindowMinutes);
     if (duplicate) return { duplicate: true, job: duplicate };
-    const job = await queueInstance.enqueue(leadData, credentialEnvelope, target, dedupKey);
+    const job = await queueInstance.enqueue(
+      leadData,
+      credentialEnvelope,
+      target,
+      dedupKey,
+      dryRun,
+      daysToUpdateOpenEvent,
+    );
     return { duplicate: false, job };
   } finally {
     releaseLock();
@@ -85,18 +98,61 @@ export async function handleLeadRequest(
   reply: FastifyReply,
 ): Promise<void> {
   const parsedRequest = leadRequestSchema.parse(request.body);
+  const query = request.query as { sync?: string };
+  const isSyncRequested = query?.sync !== 'false';
+  const dryRun = parsedRequest.dryRun ?? false;
+  const daysToUpdateOpenEvent = parsedRequest.daysToUpdateOpenEvent ?? 0;
+
   if (!env.QUEUE_ENABLED) {
-    logger.warn('Requisição rejeitada: fila desativada por configuração');
-    return reply.status(503).send({
-      success: false,
-      message: 'Processamento indisponível: fila desativada por configuração',
-    });
+    if (!isSyncRequested) {
+      logger.warn('Requisição assíncrona rejeitada: fila desativada por configuração');
+      return reply.status(503).send({
+        success: false,
+        message: 'Processamento assíncrono indisponível: fila desativada por configuração',
+      });
+    }
+
+    try {
+      const result = await processLeadViaApi(
+        parsedRequest.data,
+        parsedRequest.credentials,
+        parsedRequest.target,
+        undefined,
+        { dryRun, daysToUpdateOpenEvent },
+      );
+      return reply.status(200).send({
+        success: true,
+        message: 'Lead processado no Syonet CRM com sucesso',
+        status: 'completed',
+        result,
+      });
+    } catch (error: unknown) {
+      const errorCode =
+        error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+          ? error.code
+          : undefined;
+      const statusCode = isSyonetConfigurationErrorCode(errorCode) ? 422 : 500;
+      logger.error(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          errorCode,
+        },
+        'Falha no processamento síncrono direto do lead',
+      );
+      return reply.status(statusCode).send({
+        success: false,
+        message: 'Falha no processamento síncrono do lead',
+        status: 'failed',
+        errorCode,
+      });
+    }
   }
+
   if (!queueInstance.hasWorker()) {
-    logger.error('Requisição rejeitada: nenhum worker ativo registrado na aplicação');
+    logger.error('Requisição rejeitada: nenhum processador de fila ativo');
     return reply.status(503).send({
       success: false,
-      message: 'Processamento indisponível: nenhum worker ativo registrado',
+      message: 'Processamento indisponível: nenhum processador de fila ativo',
     });
   }
 
@@ -105,16 +161,17 @@ export async function handleLeadRequest(
 
   logger.info('Recebida requisição de processamento de lead');
 
-  const query = request.query as { sync?: string };
-
   // A desduplicação é isolada por origem e unidade sem persistir a URL em texto claro.
-  const dedupKey = buildDedupKey(leadData, parsedRequest.credentials.url, parsedRequest.target);
+  const dedupKey = buildDedupKey(
+    leadData,
+    parsedRequest.credentials.url,
+    parsedRequest.target,
+    dryRun,
+  );
   const dedupWindowMinutes =
     leadData.idConversa || leadData.id
       ? env.JOB_RETENTION_DAYS * 24 * 60
       : env.DEDUP_WINDOW_MINUTES;
-
-  const isSyncRequested = query?.sync === 'true';
 
   const enqueueResult = await enqueueDeduplicated(
     leadData,
@@ -122,6 +179,8 @@ export async function handleLeadRequest(
     parsedRequest.target,
     dedupKey,
     dedupWindowMinutes,
+    dryRun,
+    daysToUpdateOpenEvent,
   );
   const job = enqueueResult.job;
   if (enqueueResult.duplicate) {

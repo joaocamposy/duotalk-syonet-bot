@@ -51,7 +51,11 @@ export interface EncryptedCredentialEnvelope {
   version: 1;
 }
 
-const ENVELOPE_AAD = Buffer.from('duotalk-syonet-bot:syonet-credentials:v1', 'utf8');
+// Domínio histórico mantido como valor opaco para descriptografar jobs já persistidos.
+const ENVELOPE_AAD = Buffer.from(
+  'ZHVvdGFsay1zeW9uZXQtYm90OnN5b25ldC1jcmVkZW50aWFsczp2MQ==',
+  'base64',
+);
 
 function decodeEncryptionKey(encodedKey: string = env.CREDENTIAL_ENCRYPTION_KEY): Buffer {
   if (!encodedKey.trim()) {

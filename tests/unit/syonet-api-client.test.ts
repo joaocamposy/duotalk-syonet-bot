@@ -201,7 +201,7 @@ describe('processLeadViaApi', () => {
       telefoneCelular: { ddd: '61', numero: '993351327' },
     });
     responses.set(
-      '/api/evento?idCliente=-55&idEmpresa=25&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO',
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0',
       [
         {
           idEvento: 321,
@@ -222,6 +222,82 @@ describe('processLeadViaApi', () => {
     expect(gateway.posts).toHaveLength(0);
   });
 
+  it('não aceita marcador de conversa injetado no texto livre da observação', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0',
+      [
+        {
+          idEvento: 321,
+          observacao:
+            'Lead recebido via Duotalk\nID conversa: conversa-anterior\nMensagem: texto livre\nID conversa: conversa-alvo',
+        },
+      ],
+    );
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(
+      makeLead({ idConversa: 'conversa-alvo' }),
+      credentials,
+      target,
+      gateway,
+    );
+
+    expect(result).toMatchObject({ eventCreated: true, eventId: 200 });
+    expect(gateway.posts.map((post) => post.path)).toEqual(['/api/evento']);
+  });
+
+  it('não cria oportunidade quando a pesquisa atinge o limite sem localizar a conversa', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0',
+      Array.from({ length: 200 }, (_, index) => ({
+        idEvento: index + 1,
+        observacao: `Lead recebido via Duotalk\nID conversa: conversa-${index}`,
+      })),
+    );
+    const gateway = new RecordingGateway(responses);
+
+    await expect(
+      processLeadViaApi(
+        makeLead({ idConversa: 'conversa-fora-do-limite' }),
+        credentials,
+        target,
+        gateway,
+      ),
+    ).rejects.toMatchObject({
+      name: 'NonRetryableJobError',
+      code: 'SYONET_DATA_CONFLICT',
+    });
+    expect(gateway.posts).toHaveLength(0);
+  });
+
   it('cria outra oportunidade quando o cliente inicia uma conversa diferente', async () => {
     const responses = makeSuccessfulResponses([
       {
@@ -238,7 +314,7 @@ describe('processLeadViaApi', () => {
       telefoneCelular: { ddd: '61', numero: '993351327' },
     });
     responses.set(
-      '/api/evento?idCliente=-55&idEmpresa=25&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO',
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0',
       [{ idEvento: 321, observacao: 'ID conversa: conversa-anterior' }],
     );
     const gateway = new RecordingGateway(responses);
@@ -248,6 +324,162 @@ describe('processLeadViaApi', () => {
       credentials,
       target,
       gateway,
+    );
+
+    expect(result).toMatchObject({ eventCreated: true, eventId: 200 });
+    expect(gateway.posts.map((post) => post.path)).toEqual(['/api/evento']);
+  });
+
+  it('adiciona a nova observação como comentário em oportunidade aberta dentro da janela', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0',
+      [],
+    );
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&idGrupoEvento=OPORTUNIDADE&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0&status=ANDAMENTO&status=AGUARDANDO&status=PENDENTE',
+      [
+        {
+          idEvento: 321,
+          idEmpresa: 25,
+          idGrupoEvento: 'OPORTUNIDADE',
+          idTipoEvento: 'NOVOS WEB',
+          status: 'ANDAMENTO',
+          dataEvento: Date.now() - 2 * 24 * 60 * 60 * 1_000,
+        },
+      ],
+    );
+    responses.set('/api/evento/321/acao', []);
+    responses.set('POST /api/evento/321/acao', { idAcao: '987' });
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(
+      makeLead({ idConversa: 'conversa-nova', mensagem: 'Nova observação' }),
+      credentials,
+      target,
+      gateway,
+      { daysToUpdateOpenEvent: 30 },
+    );
+
+    expect(result).toMatchObject({ eventCreated: false, eventId: 321 });
+    expect(gateway.posts).toHaveLength(1);
+    expect(gateway.posts[0]).toMatchObject({
+      path: '/api/evento/321/acao',
+      body: {
+        tipo: 'COMENTARIO',
+        resultado: 'PENDENTE',
+      },
+    });
+    expect((gateway.posts[0].body as Record<string, string>).conclusao).toContain(
+      'Nova observação',
+    );
+  });
+
+  it('não repete o comentário quando a conversa já está registrada na oportunidade aberta', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0',
+      [],
+    );
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&idGrupoEvento=OPORTUNIDADE&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0&status=ANDAMENTO&status=AGUARDANDO&status=PENDENTE',
+      [
+        {
+          idEvento: 321,
+          idEmpresa: 25,
+          idGrupoEvento: 'OPORTUNIDADE',
+          idTipoEvento: 'NOVOS WEB',
+          status: 'AGUARDANDO',
+          dataEvento: Date.now(),
+        },
+      ],
+    );
+    responses.set('/api/evento/321/acao', [
+      {
+        idAcao: 900,
+        conclusao: 'Lead recebido via Duotalk\nID conversa: conversa-nova',
+      },
+    ]);
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(
+      makeLead({ idConversa: 'conversa-nova' }),
+      credentials,
+      target,
+      gateway,
+      { daysToUpdateOpenEvent: 30 },
+    );
+
+    expect(result).toMatchObject({ eventCreated: false, eventId: 321 });
+    expect(gateway.posts).toHaveLength(0);
+  });
+
+  it('cria uma oportunidade quando o evento aberto está fora da janela', async () => {
+    const responses = makeSuccessfulResponses([
+      {
+        idCliente: -55,
+        nomeCliente: 'Lead Teste',
+        email: 'lead@example.com',
+        telefoneCelular: { ddd: '61', numero: '993351327' },
+      },
+    ]);
+    responses.set('/api/cliente/-55', {
+      idCliente: -55,
+      nomeCliente: 'Lead Teste',
+      email: 'lead@example.com',
+      telefoneCelular: { ddd: '61', numero: '993351327' },
+    });
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0',
+      [],
+    );
+    responses.set(
+      '/api/evento?idCliente=-55&idEmpresa=25&idGrupoEvento=OPORTUNIDADE&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0&status=ANDAMENTO&status=AGUARDANDO&status=PENDENTE',
+      [
+        {
+          idEvento: 321,
+          idEmpresa: 25,
+          idGrupoEvento: 'OPORTUNIDADE',
+          idTipoEvento: 'NOVOS WEB',
+          status: 'PENDENTE',
+          dataEvento: Date.now() - 31 * 24 * 60 * 60 * 1_000,
+        },
+      ],
+    );
+    const gateway = new RecordingGateway(responses);
+
+    const result = await processLeadViaApi(
+      makeLead({ idConversa: 'conversa-nova' }),
+      credentials,
+      target,
+      gateway,
+      { daysToUpdateOpenEvent: 30 },
     );
 
     expect(result).toMatchObject({ eventCreated: true, eventId: 200 });
@@ -271,14 +503,21 @@ describe('processLeadViaApi', () => {
     });
     const baseGateway = new RecordingGateway(responses);
     const eventSearchPath =
-      '/api/evento?idCliente=-55&idEmpresa=25&idTipoEvento=NOVOS+WEB&maxRegistros=200&ordenacao=DATAEVENTO';
+      '/api/evento?idCliente=-55&idEmpresa=25&maxRegistros=200&ordenacao=DATAEVENTO&dataFutura=true&pagina=0';
     let eventCreated = false;
     let eventPosts = 0;
     const gateway: SyonetGateway = {
       get: async <T>(path: string): Promise<T> => {
         if (path === eventSearchPath) {
           return (
-            eventCreated ? [{ idEvento: 200, observacao: 'ID conversa: conversa-simultanea' }] : []
+            eventCreated
+              ? [
+                  {
+                    idEvento: 200,
+                    observacao: 'Lead recebido via Duotalk\nID conversa: conversa-simultanea',
+                  },
+                ]
+              : []
           ) as T;
         }
         return baseGateway.get<T>(path);
@@ -368,7 +607,8 @@ describe('processLeadViaApi', () => {
       {
         name: 'NonRetryableJobError',
         message:
-          'Cliente criado, mas a criação da oportunidade não foi confirmada; exige conciliação no Syonet',
+          'Cliente criado ou atualizado, mas a criação da oportunidade não foi confirmada; exige conciliação no Syonet',
+        code: 'SYONET_WRITE_REQUIRES_RECONCILIATION',
       },
     );
     expect(gateway.posts.map((post) => post.path)).toEqual(['/api/cliente', '/api/evento']);
@@ -401,12 +641,9 @@ describe('processLeadViaApi', () => {
   it('não grava cliente nem evento no modo dry-run', async () => {
     const gateway = new RecordingGateway(makeSuccessfulResponses([]));
 
-    const result = await processLeadViaApi(
-      makeLead({ dryRun: true }),
-      credentials,
-      target,
-      gateway,
-    );
+    const result = await processLeadViaApi(makeLead(), credentials, target, gateway, {
+      dryRun: true,
+    });
 
     expect(result).toEqual({
       clientCreated: false,
@@ -438,12 +675,9 @@ describe('processLeadViaApi', () => {
     });
     const gateway = new RecordingGateway(responses);
 
-    const result = await processLeadViaApi(
-      makeLead({ dryRun: true }),
-      credentials,
-      target,
-      gateway,
-    );
+    const result = await processLeadViaApi(makeLead(), credentials, target, gateway, {
+      dryRun: true,
+    });
 
     expect(result).toMatchObject({
       clientCreated: false,
@@ -468,7 +702,7 @@ describe('processLeadViaApi', () => {
     const gateway = new RecordingGateway(responses);
 
     await expect(
-      processLeadViaApi(makeLead({ dryRun: true }), credentials, target, gateway),
+      processLeadViaApi(makeLead(), credentials, target, gateway, { dryRun: true }),
     ).rejects.toMatchObject({ code: 'SYONET_EVENT_TYPE_MAPPING_NOT_FOUND' });
     expect(gateway.posts).toHaveLength(0);
   });
@@ -478,7 +712,7 @@ describe('processLeadViaApi', () => {
     const gateway = new RecordingGateway(responses);
 
     await expect(
-      processLeadViaApi(makeLead({ dryRun: true }), credentials, target, gateway),
+      processLeadViaApi(makeLead(), credentials, target, gateway, { dryRun: true }),
     ).rejects.toThrow();
     expect(gateway.posts).toHaveLength(0);
   });

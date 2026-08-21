@@ -42,10 +42,11 @@ describe('Queue Drivers (Memory & File)', () => {
 
   it('MemoryQueueDriver deve enfileirar e processar jobs com sucesso', async () => {
     const driver = new MemoryQueueDriver(1);
-    const job = await driver.enqueue(sampleLead, credentialEnvelope, target);
+    const job = await driver.enqueue(sampleLead, credentialEnvelope, target, undefined, false, 30);
 
     expect(job.id).toBeDefined();
     expect(job.status).toBe('pending');
+    expect(job.daysToUpdateOpenEvent).toBe(30);
 
     let processedJobId = '';
     driver.process(async (j) => {
@@ -80,7 +81,7 @@ describe('Queue Drivers (Memory & File)', () => {
 
   it('FileQueueDriver deve enfileirar, salvar em disco e restaurar jobs pós-crash', async () => {
     const driver1 = new FileQueueDriver(testFilePath, 1);
-    const job = await driver1.enqueue(sampleLead, credentialEnvelope, target);
+    const job = await driver1.enqueue(sampleLead, credentialEnvelope, target, undefined, false, 30);
 
     expect(fs.existsSync(testFilePath)).toBe(true);
 
@@ -92,7 +93,36 @@ describe('Queue Drivers (Memory & File)', () => {
     expect(restoredJob?.id).toBe(job.id);
     expect(restoredJob?.data.nome).toBe('Teste Fila');
     expect(restoredJob?.credentialEnvelope).toEqual(credentialEnvelope);
+    expect(restoredJob?.daysToUpdateOpenEvent).toBe(30);
     expect(fs.statSync(testFilePath).mode & 0o777).toBe(0o600);
+  });
+
+  it('migra dryRun legado para fora dos dados antes de processar o job', async () => {
+    fs.mkdirSync(path.dirname(testFilePath), { recursive: true });
+    fs.writeFileSync(
+      testFilePath,
+      JSON.stringify([
+        {
+          id: 'job-legado-dry-run',
+          data: { ...sampleLead, dryRun: true },
+          target,
+          credentialEnvelope,
+          status: 'pending',
+          attempts: 0,
+          maxAttempts: 3,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ]),
+      'utf8',
+    );
+
+    const driver = new FileQueueDriver(testFilePath, 1);
+    const recovered = await driver.getJob('job-legado-dry-run');
+
+    expect(recovered?.dryRun).toBe(true);
+    expect(recovered?.data).not.toHaveProperty('dryRun');
+    expect(JSON.parse(fs.readFileSync(testFilePath, 'utf8'))[0]).toMatchObject({ dryRun: true });
   });
 
   it('remove dados pessoais do arquivo quando o job termina', async () => {
@@ -133,6 +163,16 @@ describe('Queue Drivers (Memory & File)', () => {
       'Não foi possível carregar a fila persistida com segurança',
     );
     expect(fs.readFileSync(testFilePath, 'utf8')).toBe('');
+  });
+
+  it('corrige a permissão de um arquivo de fila restaurado antes de carregá-lo', async () => {
+    const driver = new FileQueueDriver(testFilePath, 1);
+    await driver.enqueue(sampleLead, credentialEnvelope, target);
+    fs.chmodSync(testFilePath, 0o644);
+
+    new FileQueueDriver(testFilePath, 1);
+
+    expect(fs.statSync(testFilePath).mode & 0o777).toBe(0o600);
   });
 
   it('recusa IDs duplicados no arquivo para não sobrescrever jobs silenciosamente', () => {
