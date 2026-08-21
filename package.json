@@ -1,5 +1,5 @@
 {
-  "name": "duotalk-syonet-bot",
+  "name": "duotalk-syonet-api",
   "version": "1.0.0",
   "description": "API para integrar leads do Duotalk ao Syonet CRM via HTTP com suporte a filas resilientes",
   "main": "dist/server.js",
